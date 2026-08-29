@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from jarvis.config import Settings, get_settings
 from jarvis.llm.base import BaseLLMProvider, CancellationToken
@@ -10,6 +10,8 @@ from jarvis.memory.vault_bridge import VaultBridge
 from jarvis.core.executive_adapter import ExecutiveAdapter
 from jarvis.core.cognitive_session import CognitiveSession
 from jarvis.core.session_manager import SessionManager, SessionResumeResult
+from jarvis.core.learning_loop import LearningLoop
+from jarvis.core.reflection_engine import ReflectionResult
 from jarvis.agents.agent_council import AgentCouncil, CouncilPlan
 from jarvis.agents.agent_registry import AgentRegistry
 from jarvis.agents.agent_router import AgentRoute, AgentRouter
@@ -25,6 +27,7 @@ class CognitiveGateway:
         self.vault_bridge = VaultBridge(self.settings.vault_path)
         self.executive = ExecutiveAdapter(self.settings.vault_path)
         self.sessions = SessionManager(self.settings)
+        self.learning = LearningLoop(self.vault_bridge)
         self.agent_registry = AgentRegistry(self.settings.vault_path)
         self.agent_router: AgentRouter = self.agent_registry.build_router()
         self.agent_council = AgentCouncil(
@@ -68,6 +71,22 @@ class CognitiveGateway:
 
     def resume_session(self, session_id: str) -> SessionResumeResult:
         return self.sessions.resume(session_id)
+
+    def reflect_and_learn(
+        self,
+        *,
+        goal: str,
+        expected: str,
+        observation: Mapping[str, Any],
+        evidence_ids: tuple[str, ...] = (),
+    ) -> tuple[ReflectionResult, Any]:
+        """Reflect on an outcome and submit only a REVIEW proposal."""
+        return self.learning.learn(
+            goal=goal,
+            expected=expected,
+            observation=observation,
+            evidence_ids=evidence_ids,
+        )
 
     def build_system_prompt(self, base_prompt: str = "", max_chars: int = 24000) -> str:
         context = self.vault.load(max_chars=max_chars)
