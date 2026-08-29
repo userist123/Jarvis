@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from jarvis.config import Settings, get_settings
 from jarvis.core.cognitive_gateway import CognitiveGateway
 from jarvis.llm.base import CancellationToken
+from jarvis.runtime.telemetry import TelemetryJournal
 
 
 @dataclass
@@ -60,6 +61,7 @@ class ChatRuntime:
         self.gateway = CognitiveGateway(settings=self.settings)
         self.session_id = session_id
         self.path = self.settings.session_memory_path.with_name(f"chat_{session_id}.json")
+        self.telemetry = TelemetryJournal(self.settings.audit_log_path)
         self.session = ChatSession.load(self.path, session_id)
 
     @staticmethod
@@ -76,10 +78,8 @@ class ChatRuntime:
         token = CancellationToken()
         chunks: List[str] = []
         system_prompt = self.gateway.build_system_prompt(self._system_prompt())
-        prompt_lines = []
-        for message in self.session.messages:
-            prompt_lines.append(f"{message['role'].title()}: {message['content']}")
-        prompt = "\n".join(prompt_lines)
+        prompt = "\n".join(f"{message['role'].title()}: {message['content']}" for message in self.session.messages)
+        self.telemetry.record("chat.request", payload={"session_id": self.session_id, "mode": "stream"})
         print("JARVIS: ", end="", flush=True)
         async for chunk in self.gateway.provider("reasoning").stream(
             prompt,
@@ -92,10 +92,12 @@ class ChatRuntime:
         answer = "".join(chunks)
         self.session.add("assistant", answer)
         self.session.save(self.path)
+        self.telemetry.record("chat.response", payload={"session_id": self.session_id, "mode": "stream", "characters": len(answer)})
         return answer
 
     async def reply(self, user_text: str) -> str:
         self.session.add("user", user_text)
+        self.telemetry.record("chat.request", payload={"session_id": self.session_id, "mode": "chat"})
         answer = await self.gateway.chat(
             self.session.messages,
             capability="reasoning",
@@ -103,6 +105,7 @@ class ChatRuntime:
         )
         self.session.add("assistant", answer)
         self.session.save(self.path)
+        self.telemetry.record("chat.response", payload={"session_id": self.session_id, "mode": "chat", "characters": len(answer)})
         return answer
 
     def reset(self) -> None:
@@ -111,3 +114,4 @@ class ChatRuntime:
             self.path.unlink(missing_ok=True)
         except OSError:
             pass
+        self.telemetry.record("chat.reset", payload={"session_id": self.session_id})
