@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# .NET
+**/bin/
+**/obj/
+
+# Runtime state
+.jarvis/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+audit_log.jsonl
+
+# Generated programs
+generated_programs/
+
+# Local secrets
+.env
+*.key
+*.pem
+
+# Local model binaries
+*.onnx
+*.gguf
+*.safetensors
