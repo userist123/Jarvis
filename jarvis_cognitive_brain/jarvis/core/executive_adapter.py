@@ -29,11 +29,10 @@ class NativeExecutiveBackend:
         module = importlib.import_module("cognitive_core.executive")
         self._principal_module = importlib.import_module("memory_controller.authorizer")
         executive_cls = getattr(module, "Executive")
-        # The canonical Executive owns MemoryController wiring and tool routing.
-        self._memory_controller_module = importlib.import_module("memory_controller.controller")
-        self._storage_module = importlib.import_module("memory_controller.storage.file_engine")
-        storage = self._storage_module.FileStorageEngine(str(vault_root))
-        controller = self._memory_controller_module.MemoryController(storage)
+        controller_module = importlib.import_module("memory_controller.controller")
+        storage_module = importlib.import_module("memory_controller.storage.file_engine")
+        storage = storage_module.FileStorageEngine(str(vault_root))
+        controller = controller_module.MemoryController(storage)
         self.executive = executive_cls(controller)
 
     def process_intent(self, principal: Any, intent_text: str) -> dict[str, Any]:
@@ -87,4 +86,6 @@ class ExecutiveAdapter:
 
     def process_as_ai_agent(self, intent_text: str) -> dict[str, Any]:
         """Run through the Vault Executive as the AI_AGENT principal."""
-        return self.process_intent(__import__("memory_controller.authorizer", fromlist=["Principal"]).Principal.AI_AGENT, intent_text)
+        from memory_controller.authorizer import Principal
+
+        return self.process_intent(Principal.AI_AGENT, intent_text)
