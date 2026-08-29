@@ -11,6 +11,7 @@ from jarvis.memory.sqlite_engine import SQLiteStorageEngine
 from jarvis.memory.recall import MultiSignalRecallEngine
 from jarvis.memory.reflection import ReflexionEngine
 from jarvis.memory.consolidation import ConsolidationEngine
+from jarvis.memory.governance import MemoryGovernance
 from jarvis.memory.invariants import Principal, Lifecycle, NoteType
 from jarvis.core.models import (
     PerceptionEvent, UserIntent, IntentType, WorkingMemory, ActivePlan,
@@ -27,11 +28,13 @@ class OODACognitiveEngine:
                  working_memory_capacity: int = 10,
                  tool_executor: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
                  cognitive_gateway: Optional[CognitiveGateway] = None,
-                 capability_policy: Optional[CapabilityPolicy] = None):
+                 capability_policy: Optional[CapabilityPolicy] = None,
+                 memory_governance: Optional[MemoryGovernance] = None):
         self.storage = storage_engine
         self.recall_engine = MultiSignalRecallEngine(self.storage)
         self.reflexion = ReflexionEngine(self.storage)
         self.consolidator = ConsolidationEngine(self.storage)
+        self.memory_governance = memory_governance or MemoryGovernance()
         self.working_memory = WorkingMemory(capacity=working_memory_capacity)
         self.tool_executor = tool_executor
         self.gateway = cognitive_gateway or CognitiveGateway(provider=llm_provider)
@@ -70,7 +73,7 @@ class OODACognitiveEngine:
             steps.append(PlanStep(step_id=1, action="iot_call", kwargs={"command": intent.raw_text}, description=f"Dispatch IoT Home Assistant control command: '{intent.raw_text}'"))
             steps.append(PlanStep(step_id=2, action="synthesize_response", kwargs={"query": f"Confirm execution of IoT command: {intent.raw_text}", "context": context}, description="Confirm device command completion"))
         elif intent.intent_type == IntentType.MEMORY_STORE:
-            steps.append(PlanStep(step_id=1, action="propose_memory", kwargs={"raw_text": intent.raw_text}, description="Store and validate note in canonical memory"))
+            steps.append(PlanStep(step_id=1, action="propose_memory", kwargs={"raw_text": intent.raw_text, "context": context}, description="Govern, deduplicate, and propose note for canonical memory review"))
         else:
             steps.append(PlanStep(step_id=1, action="synthesize_response", kwargs={"query": intent.raw_text, "context": context}, description="Generate assistant conversational response"))
         return ActivePlan(goal=intent.raw_text, steps=steps)
@@ -98,14 +101,20 @@ class OODACognitiveEngine:
             if step.action == "propose_memory":
                 self.policy.require(Capability.WRITE_MEMORY)
                 raw_text = step.kwargs.get("raw_text", "")
+                existing = step.kwargs.get("context", [])
                 note_id = str(uuid.uuid4())
                 note_data = {"id": note_id, "type": NoteType.KNOWLEDGE.value, "lifecycle": Lifecycle.REVIEW.value,
                              "category": "user-memory", "tags": ["memory-store", "user-instruction"],
                              "created": time.strftime("%Y-%m-%d"), "updated": time.strftime("%Y-%m-%d"),
-                             "provenance": {"source_type": "inference", "source_ref": "user-instruction"},
+                             "provenance": {"source_type": "user", "source_ref": "ooda:memory-store"},
                              "confidence": "high", "verification": "unverified", "content": raw_text, "relations": []}
-                self.storage.propose(principal, note_data)
-                res = {"note_id": note_id, "status": "proposed"}
+                decision = self.memory_governance.evaluate(note_data, existing)
+                if decision.action == "duplicate":
+                    res = {"status": "duplicate", "duplicate_of": decision.duplicate_of, "similarity": decision.similarity, "reason": decision.reason}
+                else:
+                    self.storage.propose(principal, note_data)
+                    res = {"note_id": note_id, "status": "review", "governance": decision.action, "reason": decision.reason,
+                           "conflict_with": decision.conflict_with, "similarity": decision.similarity}
                 step.status = StepStatus.SUCCESS
                 step.result = res
                 return StepExecutionResult(step_id=step.step_id, action=step.action, status="success", result=res, execution_time_ms=(time.time() - t0) * 1000.0)
