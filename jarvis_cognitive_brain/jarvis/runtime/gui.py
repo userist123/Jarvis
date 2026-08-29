@@ -24,12 +24,13 @@ class JarvisApp(tk.Tk):
 
         self.chat = ChatRuntime(self.settings)
         self.status = tk.StringVar(value="Starting...")
+        self.mode = tk.StringVar(value="initializing")
         self.model = tk.StringVar(value=self.settings.ollama_model)
         self.vault = tk.StringVar(value=str(self.settings.vault_path))
         self.executive = tk.StringVar(value="checking...")
         self.agent = tk.StringVar(value="not routed")
         self.agent_score = tk.StringVar(value="-")
-        self.evidence = tk.StringVar(value="preview: n/a")
+        self.evidence = tk.StringVar(value="n/a")
         self.memory_count = tk.StringVar(value="0")
         self.memory_ids = tk.StringVar(value="-")
         self.context_chars = tk.StringVar(value="0")
@@ -67,6 +68,7 @@ class JarvisApp(tk.Tk):
 
         ttk.Label(right, text="Cognitive Dashboard", font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 10))
         self._info_row(right, "Status", self.status)
+        self._info_row(right, "Mode", self.mode)
         self._info_row(right, "Model", self.model)
         self._info_row(right, "Vault", self.vault)
         self._info_row(right, "Executive", self.executive)
@@ -74,7 +76,7 @@ class JarvisApp(tk.Tk):
         self._info_row(right, "Agent score", self.agent_score)
 
         ttk.Separator(right).pack(fill="x", pady=10)
-        ttk.Label(right, text="Grounding preview", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 8))
+        ttk.Label(right, text="Grounding", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 8))
         self._info_row(right, "Evidence", self.evidence)
         self._info_row(right, "Memory count", self.memory_count)
         self._info_row(right, "Context chars", self.context_chars)
@@ -113,13 +115,33 @@ class JarvisApp(tk.Tk):
         self.status.set("Thinking...")
         threading.Thread(target=self._reply_worker, args=(text,), daemon=True).start()
 
+    @staticmethod
+    def _extract_answer(result: object) -> str:
+        if isinstance(result, dict):
+            for key in ("answer", "response", "content", "message"):
+                value = result.get(key)
+                if value:
+                    return str(value)
+            return str(result)
+        return str(result)
+
     def _reply_worker(self, text: str) -> None:
         try:
-            routes, council = self.chat.gateway.route_agents(text)
-            vault_hits = self.chat.gateway.search_vault(text, limit=8)
+            gateway = self.chat.gateway
+            routes, council = gateway.route_agents(text)
+            vault_hits = gateway.search_vault(text, limit=8)
             top = routes[0] if routes else None
-            answer = asyncio.run(self.chat.reply(text))
+
+            if gateway.executive.available:
+                result = gateway.process_intent(text)
+                answer = self._extract_answer(result)
+                mode = "canonical-executive"
+            else:
+                answer = asyncio.run(self.chat.reply(text))
+                mode = "local-chat-fallback"
+
             metadata = {
+                "mode": mode,
                 "agent": getattr(top, "agent_id", None) if top else None,
                 "agent_score": getattr(top, "score", None) if top else None,
                 "memory_ids": [str(item.get("id")) for item in vault_hits if item.get("id")],
@@ -129,12 +151,15 @@ class JarvisApp(tk.Tk):
             }
         except Exception as exc:
             answer = f"Runtime error: {exc}"
-            metadata = {}
+            metadata = {"mode": "error", "error": str(exc)}
         self.after(0, self._finish_reply, answer, metadata)
 
     def _finish_reply(self, answer: str, metadata: dict) -> None:
         self._append("JARVIS", answer)
-        if metadata:
+        self.mode.set(str(metadata.get("mode", "unknown")))
+        if metadata.get("error"):
+            self.executive.set(f"error: {metadata['error']}")
+        else:
             self.agent.set(str(metadata.get("agent") or "not routed"))
             score = metadata.get("agent_score")
             self.agent_score.set(f"{score:.3f}" if isinstance(score, (int, float)) else "-")
@@ -142,7 +167,7 @@ class JarvisApp(tk.Tk):
             self.memory_count.set(str(metadata.get("memory_count", 0)))
             self.memory_ids.set(", ".join(ids[:6]) if ids else "-")
             self.context_chars.set(str(metadata.get("context_chars", 0)))
-            self.evidence.set("preview: retrieved" if ids else "preview: none")
+            self.evidence.set("retrieved preview" if ids else "none retrieved")
             self.plan_state.set(str(metadata.get("council") or "single-agent"))
         self.send.configure(state="normal")
         self.status.set("Ready")
@@ -153,7 +178,8 @@ class JarvisApp(tk.Tk):
         self.transcript.configure(state="normal")
         self.transcript.delete("1.0", "end")
         self.transcript.configure(state="disabled")
-        self.evidence.set("preview: n/a")
+        self.mode.set("ready")
+        self.evidence.set("n/a")
         self.agent.set("not routed")
         self.agent_score.set("-")
         self.memory_count.set("0")
