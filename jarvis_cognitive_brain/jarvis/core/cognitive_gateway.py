@@ -6,6 +6,9 @@ from jarvis.config import Settings, get_settings
 from jarvis.llm.base import BaseLLMProvider, CancellationToken
 from jarvis.llm.model_router import ModelRouter
 from jarvis.memory.vault_context import VaultContextLoader
+from jarvis.agents.agent_council import AgentCouncil, CouncilPlan
+from jarvis.agents.agent_registry import AgentRegistry
+from jarvis.agents.agent_router import AgentRoute, AgentRouter
 
 
 class CognitiveGateway:
@@ -15,10 +18,32 @@ class CognitiveGateway:
         self.settings = settings or get_settings()
         self.router = ModelRouter(self.settings)
         self.vault = VaultContextLoader(settings=self.settings)
+        self.agent_registry = AgentRegistry(self.settings.vault_path)
+        self.agent_router: AgentRouter = self.agent_registry.build_router()
+        self.agent_council = AgentCouncil(
+            risky_capabilities=("iot", "iot_control", "execute_code", "network", "security")
+        )
         self._provider_override = provider
 
     def provider(self, capability: str = "reasoning") -> BaseLLMProvider:
         return self._provider_override or self.router.provider(capability)
+
+    def route_agents(
+        self,
+        task: str,
+        required_capabilities: tuple[str, ...] = (),
+        *,
+        complexity: int = 1,
+        require_review: bool = False,
+    ) -> tuple[list[AgentRoute], CouncilPlan]:
+        routes = self.agent_router.rank(task, required_capabilities)
+        plan = self.agent_council.plan(
+            routes,
+            required_capabilities,
+            complexity=complexity,
+            require_review=require_review,
+        )
+        return routes, plan
 
     def build_system_prompt(self, base_prompt: str = "", max_chars: int = 24000) -> str:
         context = self.vault.load(max_chars=max_chars)
