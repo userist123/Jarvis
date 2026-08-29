@@ -59,24 +59,31 @@ class ChatRuntime:
         self.settings = settings or get_settings()
         self.gateway = CognitiveGateway(settings=self.settings)
         self.session_id = session_id
-        self.path = self.settings.session_memory_path.with_name(
-            f"chat_{session_id}.json"
-        )
+        self.path = self.settings.session_memory_path.with_name(f"chat_{session_id}.json")
         self.session = ChatSession.load(self.path, session_id)
 
-    async def stream_reply(self, user_text: str) -> str:
-        self.session.add("user", user_text)
-        system_prompt = (
+    @staticmethod
+    def _system_prompt() -> str:
+        return (
             "You are JARVIS running locally. "
             "Use the canonical AI Memory Vault context supplied by the gateway. "
             "Do not claim actions were executed unless an execution result exists. "
             "When evidence is unavailable or conflicting, say so explicitly."
         )
+
+    async def stream_reply(self, user_text: str) -> str:
+        self.session.add("user", user_text)
         token = CancellationToken()
         chunks: List[str] = []
+        system_prompt = self.gateway.build_system_prompt(self._system_prompt())
+        prompt_lines = []
+        for message in self.session.messages:
+            prompt_lines.append(f"{message['role'].title()}: {message['content']}")
+        prompt = "\n".join(prompt_lines)
         print("JARVIS: ", end="", flush=True)
         async for chunk in self.gateway.provider("reasoning").stream(
-            self.gateway.build_system_prompt(system_prompt),
+            prompt,
+            system_prompt=system_prompt,
             cancellation_token=token,
         ):
             chunks.append(chunk)
@@ -89,16 +96,10 @@ class ChatRuntime:
 
     async def reply(self, user_text: str) -> str:
         self.session.add("user", user_text)
-        system_prompt = (
-            "You are JARVIS running locally. "
-            "Use the canonical AI Memory Vault context supplied by the gateway. "
-            "Do not claim actions were executed unless an execution result exists. "
-            "When evidence is unavailable or conflicting, say so explicitly."
-        )
         answer = await self.gateway.chat(
             self.session.messages,
             capability="reasoning",
-            system_prompt=system_prompt,
+            system_prompt=self._system_prompt(),
         )
         self.session.add("assistant", answer)
         self.session.save(self.path)
