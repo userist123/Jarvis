@@ -17,6 +17,7 @@ class RetrievalScore:
     confidence: float
     freshness: float
     version_match: float
+    graph_bonus: float
     final_score: float
     reason: str
 
@@ -45,9 +46,10 @@ class RetrievalRanker:
         "hypothesis": 0.20,
     }
 
-    def __init__(self, *, version_bonus: float = 0.30, version_penalty: float = 0.30) -> None:
+    def __init__(self, *, version_bonus: float = 0.30, version_penalty: float = 0.30, max_graph_bonus: float = 0.12) -> None:
         self.version_bonus = version_bonus
         self.version_penalty = version_penalty
+        self.max_graph_bonus = max(0.0, max_graph_bonus)
 
     @classmethod
     def lexical_relevance(cls, query: str, content: str) -> float:
@@ -85,7 +87,6 @@ class RetrievalRanker:
         note_version = _norm(note.get("version_range"))
         if not note_version:
             return 0.0
-        # Explicit version mentioned in the query gets a positive/negative adjustment.
         if note_version in query_text or any(part in query_text for part in note_version.split() if len(part) > 2):
             return bonus
         versionish = re.findall(r"\b(?:python|powershell|node|nodejs|dotnet|\.net|windows)\s*\d+(?:\.\d+)?(?:\.x)?\b", query_text)
@@ -99,6 +100,7 @@ class RetrievalRanker:
         confidence = self.confidence_score(note)
         freshness = self.freshness_score(note)
         version_match = self.version_score(query, note, bonus=self.version_bonus, penalty=self.version_penalty)
+        graph_bonus = min(self.max_graph_bonus, max(0.0, float(note.get("graph_bonus", 0.0) or 0.0)))
 
         final = (
             (0.45 * relevance)
@@ -106,6 +108,7 @@ class RetrievalRanker:
             + (0.15 * authority)
             + (0.10 * freshness)
             + version_match
+            + graph_bonus
         )
         lifecycle = _norm(note.get("lifecycle"))
         verification = _norm(note.get("verification"))
@@ -122,6 +125,8 @@ class RetrievalRanker:
         ]
         if version_match:
             reasons.append(f"version_adjustment={version_match:+.2f}")
+        if graph_bonus:
+            reasons.append(f"graph_bonus={graph_bonus:+.2f}")
         return RetrievalScore(
             note_id=str(note.get("id") or ""),
             relevance=relevance,
@@ -129,6 +134,7 @@ class RetrievalRanker:
             confidence=confidence,
             freshness=freshness,
             version_match=version_match,
+            graph_bonus=graph_bonus,
             final_score=final,
             reason=", ".join(reasons),
         )
