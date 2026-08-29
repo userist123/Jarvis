@@ -18,15 +18,24 @@ class JarvisApp(tk.Tk):
         super().__init__()
         self.settings = settings or get_settings()
         self.title("JARVIS")
-        self.geometry("1100x720")
-        self.minsize(820, 560)
+        self.geometry("1240x780")
+        self.minsize(920, 600)
         self.configure(padx=12, pady=12)
 
         self.chat = ChatRuntime(self.settings)
         self.status = tk.StringVar(value="Starting...")
         self.model = tk.StringVar(value=self.settings.ollama_model)
         self.vault = tk.StringVar(value=str(self.settings.vault_path))
-        self.evidence = tk.StringVar(value="Evidence: n/a")
+        self.executive = tk.StringVar(value="checking...")
+        self.agent = tk.StringVar(value="not routed")
+        self.agent_score = tk.StringVar(value="-")
+        self.evidence = tk.StringVar(value="preview: n/a")
+        self.memory_count = tk.StringVar(value="0")
+        self.memory_ids = tk.StringVar(value="-")
+        self.context_chars = tk.StringVar(value="0")
+        self.tool_state = tk.StringVar(value="policy-gated")
+        self.plan_state = tk.StringVar(value="idle")
+        self.session = tk.StringVar(value=self.chat.session_id)
 
         self._build_ui()
         self.bind("<Control-Return>", lambda _event: self._send())
@@ -43,8 +52,8 @@ class JarvisApp(tk.Tk):
 
         left = ttk.Frame(body, padding=8)
         right = ttk.Frame(body, padding=8)
-        body.add(left, weight=3)
-        body.add(right, weight=1)
+        body.add(left, weight=4)
+        body.add(right, weight=2)
 
         self.transcript = ScrolledText(left, wrap="word", state="disabled", font=("Consolas", 11))
         self.transcript.pack(fill="both", expand=True)
@@ -56,13 +65,28 @@ class JarvisApp(tk.Tk):
         self.send = ttk.Button(composer, text="Send", command=self._send)
         self.send.pack(side="right", padx=(8, 0), fill="y")
 
-        ttk.Label(right, text="Runtime", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 10))
+        ttk.Label(right, text="Cognitive Dashboard", font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 10))
+        self._info_row(right, "Status", self.status)
         self._info_row(right, "Model", self.model)
         self._info_row(right, "Vault", self.vault)
-        self._info_row(right, "Grounding", self.evidence)
+        self._info_row(right, "Executive", self.executive)
+        self._info_row(right, "Agent", self.agent)
+        self._info_row(right, "Agent score", self.agent_score)
+
+        ttk.Separator(right).pack(fill="x", pady=10)
+        ttk.Label(right, text="Grounding preview", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 8))
+        self._info_row(right, "Evidence", self.evidence)
+        self._info_row(right, "Memory count", self.memory_count)
+        self._info_row(right, "Context chars", self.context_chars)
+        self._info_row(right, "Memory IDs", self.memory_ids)
+
+        ttk.Separator(right).pack(fill="x", pady=10)
+        ttk.Label(right, text="Execution", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 8))
+        self._info_row(right, "Plan", self.plan_state)
+        self._info_row(right, "Tools", self.tool_state)
+        self._info_row(right, "Session", self.session)
 
         ttk.Separator(right).pack(fill="x", pady=12)
-        ttk.Label(right, text="Session", font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 8))
         ttk.Button(right, text="New session", command=self._reset).pack(fill="x")
         ttk.Button(right, text="Refresh status", command=self._refresh_status).pack(fill="x", pady=(6, 0))
 
@@ -71,7 +95,7 @@ class JarvisApp(tk.Tk):
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=3)
         ttk.Label(row, text=f"{label}:").pack(side="left")
-        ttk.Label(row, textvariable=variable, wraplength=280).pack(side="right", anchor="e")
+        ttk.Label(row, textvariable=variable, wraplength=300, justify="right").pack(side="right", anchor="e")
 
     def _append(self, speaker: str, text: str) -> None:
         self.transcript.configure(state="normal")
@@ -86,37 +110,73 @@ class JarvisApp(tk.Tk):
         self.input.delete("1.0", "end")
         self._append("You", text)
         self.send.configure(state="disabled")
+        self.status.set("Thinking...")
         threading.Thread(target=self._reply_worker, args=(text,), daemon=True).start()
 
     def _reply_worker(self, text: str) -> None:
         try:
+            routes, council = self.chat.gateway.route_agents(text)
+            vault_hits = self.chat.gateway.search_vault(text, limit=8)
+            top = routes[0] if routes else None
             answer = asyncio.run(self.chat.reply(text))
+            metadata = {
+                "agent": getattr(top, "agent_id", None) if top else None,
+                "agent_score": getattr(top, "score", None) if top else None,
+                "memory_ids": [str(item.get("id")) for item in vault_hits if item.get("id")],
+                "memory_count": len(vault_hits),
+                "context_chars": sum(len(str(item.get("content", ""))) for item in vault_hits),
+                "council": getattr(council, "mode", None),
+            }
         except Exception as exc:
             answer = f"Runtime error: {exc}"
-        self.after(0, self._finish_reply, answer)
+            metadata = {}
+        self.after(0, self._finish_reply, answer, metadata)
 
-    def _finish_reply(self, answer: str) -> None:
+    def _finish_reply(self, answer: str, metadata: dict) -> None:
         self._append("JARVIS", answer)
+        if metadata:
+            self.agent.set(str(metadata.get("agent") or "not routed"))
+            score = metadata.get("agent_score")
+            self.agent_score.set(f"{score:.3f}" if isinstance(score, (int, float)) else "-")
+            ids = metadata.get("memory_ids", [])
+            self.memory_count.set(str(metadata.get("memory_count", 0)))
+            self.memory_ids.set(", ".join(ids[:6]) if ids else "-")
+            self.context_chars.set(str(metadata.get("context_chars", 0)))
+            self.evidence.set("preview: retrieved" if ids else "preview: none")
+            self.plan_state.set(str(metadata.get("council") or "single-agent"))
         self.send.configure(state="normal")
         self.status.set("Ready")
 
     def _reset(self) -> None:
         self.chat.reset()
+        self.session.set(self.chat.session_id)
         self.transcript.configure(state="normal")
         self.transcript.delete("1.0", "end")
         self.transcript.configure(state="disabled")
-        self.evidence.set("Evidence: n/a")
+        self.evidence.set("preview: n/a")
+        self.agent.set("not routed")
+        self.agent_score.set("-")
+        self.memory_count.set("0")
+        self.memory_ids.set("-")
+        self.context_chars.set("0")
+        self.plan_state.set("idle")
 
     def _refresh_status(self) -> None:
         def worker() -> None:
             try:
                 status = asyncio.run(diagnose(self.settings))
-                text = "Ready" if status.ollama_healthy else "Ollama unavailable"
+                runtime_text = "Ready" if status.ollama_healthy else "Ollama unavailable"
+                exec_text = "available" if status.executive_available else status.executive_reason
             except Exception as exc:
-                text = f"Diagnostics error: {exc}"
-            self.after(0, self.status.set, text)
+                runtime_text = f"Diagnostics error: {exc}"
+                exec_text = "unknown"
+            self.after(0, self._apply_status, runtime_text, exec_text)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _apply_status(self, runtime_text: str, executive_text: str) -> None:
+        self.status.set(runtime_text)
+        self.executive.set(executive_text)
 
 
 def main() -> int:
