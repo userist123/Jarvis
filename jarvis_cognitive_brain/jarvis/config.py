@@ -47,6 +47,7 @@ class Settings(BaseSettings):
     claude_api_key: Optional[str] = Field(default=None)
 
     vault_path: Path = Field(default_factory=_default_vault_path)
+    sync_vault: bool = Field(default=True)
     sqlite_db_path: Path = Field(default=Path("vault_memory.sqlite3"))
     sqlite_busy_timeout_ms: int = Field(default=5000)
     checkpoint_dir: Path = Field(default=Path(".checkpoints"))
