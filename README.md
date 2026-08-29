@@ -13,10 +13,19 @@ User
   -> OODA + Agent Router
   -> Memory Recall
   -> AI_Memory_Vault + SQLite index
+  -> Cognitive Gateway
+  -> Model Router
   -> Ollama
-  -> Critic / Verifier
+  -> Capability Policy
+  -> Validator / Critic
   -> Response
 ```
+
+## Memory Contract
+
+JARVIS treats the AI Memory Vault as canonical memory and SQLite as a derived runtime index. Memory writes are proposals first and are governed by deterministic checks for provenance, verification, technology/version scope, duplication, and conflict handling.
+
+The governance layer follows the Vault rules: unknown technology/version scope does not trigger automatic deduplication; unresolved conflicts are preserved instead of silently overwritten; weak or unverified candidates remain in review.
 
 ## Components
 
