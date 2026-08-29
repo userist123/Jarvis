@@ -17,6 +17,7 @@ from jarvis.memory.vault_bridge import VaultBridge
 
 class ExecutiveBackend(Protocol):
     def process_intent(self, principal: Any, intent_text: str) -> dict[str, Any]: ...
+    def propose_synapse(self, principal: Any, source_id: str, target_id: str) -> Optional[str]: ...
 
 
 class NativeExecutiveBackend:
@@ -28,10 +29,18 @@ class NativeExecutiveBackend:
         module = importlib.import_module("cognitive_core.executive")
         self._principal_module = importlib.import_module("memory_controller.authorizer")
         executive_cls = getattr(module, "Executive")
-        self.executive = executive_cls()
+        # The canonical Executive owns MemoryController wiring and tool routing.
+        self._memory_controller_module = importlib.import_module("memory_controller.controller")
+        self._storage_module = importlib.import_module("memory_controller.storage.file_engine")
+        storage = self._storage_module.FileStorageEngine(str(vault_root))
+        controller = self._memory_controller_module.MemoryController(storage)
+        self.executive = executive_cls(controller)
 
     def process_intent(self, principal: Any, intent_text: str) -> dict[str, Any]:
         return dict(self.executive.process_intent(principal, intent_text))
+
+    def propose_synapse(self, principal: Any, source_id: str, target_id: str) -> Optional[str]:
+        return self.executive.reflection.propose_synapse(principal, source_id, target_id, relation_type="co_activated")
 
 
 class ExecutiveAdapter:
@@ -68,10 +77,14 @@ class ExecutiveAdapter:
             raise RuntimeError(f"Executive backend unavailable: {self._reason}")
         return self._backend.process_intent(principal, intent_text)
 
-    def process_as_ai_agent(self, intent_text: str) -> dict[str, Any]:
-        """Run through the Vault Executive as the AI_AGENT principal."""
+    def propose_synapse(self, source_id: str, target_id: str) -> Optional[str]:
+        """Create a co-activation edge through the canonical ReflectionPipeline."""
         if self._backend is None:
-            raise RuntimeError(f"Executive backend unavailable: {self._reason}")
+            return None
         from memory_controller.authorizer import Principal
 
-        return self._backend.process_intent(Principal.AI_AGENT, intent_text)
+        return self._backend.propose_synapse(Principal.AI_AGENT, source_id, target_id)
+
+    def process_as_ai_agent(self, intent_text: str) -> dict[str, Any]:
+        """Run through the Vault Executive as the AI_AGENT principal."""
+        return self.process_intent(__import__("memory_controller.authorizer", fromlist=["Principal"]).Principal.AI_AGENT, intent_text)
