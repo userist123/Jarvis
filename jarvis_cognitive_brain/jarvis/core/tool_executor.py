@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Callable, Mapping, Optional
 
+from jarvis.core.capability_policy import Capability, CapabilityPolicy
+
 
 class RiskLevel(str, Enum):
     LOW = "LOW"
@@ -19,7 +21,7 @@ class ApprovalRequiredError(RuntimeError):
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
-    capability: str
+    capability: Capability | str
     risk: RiskLevel = RiskLevel.LOW
     handler: Optional[Callable[..., Any]] = None
 
@@ -35,7 +37,7 @@ class ToolObservation:
 class ToolExecutor:
     """Guarded side-effect boundary for JARVIS tools."""
 
-    def __init__(self, policy: Any) -> None:
+    def __init__(self, policy: CapabilityPolicy) -> None:
         self.policy = policy
         self._tools: dict[str, ToolSpec] = {}
 
@@ -52,6 +54,10 @@ class ToolExecutor:
         except KeyError as exc:
             raise KeyError(f"Unknown tool: {name}") from exc
 
+    @staticmethod
+    def _capability(value: Capability | str) -> Capability:
+        return value if isinstance(value, Capability) else Capability(value)
+
     def execute(
         self,
         name: str,
@@ -60,9 +66,10 @@ class ToolExecutor:
         approved: bool = False,
     ) -> ToolObservation:
         spec = self.get(name)
-        allowed = bool(self.policy.is_allowed(spec.capability))
-        if not allowed:
-            return ToolObservation(name, False, error=f"Capability denied: {spec.capability}")
+        capability = self._capability(spec.capability)
+        decision = self.policy.decide(capability)
+        if not decision.allowed:
+            return ToolObservation(name, False, error=f"Capability denied: {capability.value}")
 
         if spec.risk in (RiskLevel.HIGH, RiskLevel.CRITICAL) and not approved:
             raise ApprovalRequiredError(f"Approval required for {name} ({spec.risk.value})")
