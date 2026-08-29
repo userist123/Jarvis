@@ -12,6 +12,7 @@ from jarvis.memory.recall import MultiSignalRecallEngine
 from jarvis.memory.reflection import ReflexionEngine
 from jarvis.memory.consolidation import ConsolidationEngine
 from jarvis.memory.memory_governance import MemoryGovernance
+from jarvis.memory.retrieval_ranker import RetrievalRanker
 from jarvis.memory.invariants import Principal, Lifecycle, NoteType
 from jarvis.core.models import (
     PerceptionEvent, UserIntent, IntentType, WorkingMemory, ActivePlan,
@@ -29,12 +30,14 @@ class OODACognitiveEngine:
                  tool_executor: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
                  cognitive_gateway: Optional[CognitiveGateway] = None,
                  capability_policy: Optional[CapabilityPolicy] = None,
-                 memory_governance: Optional[MemoryGovernance] = None):
+                 memory_governance: Optional[MemoryGovernance] = None,
+                 retrieval_ranker: Optional[RetrievalRanker] = None):
         self.storage = storage_engine
         self.recall_engine = MultiSignalRecallEngine(self.storage)
         self.reflexion = ReflexionEngine(self.storage)
         self.consolidator = ConsolidationEngine(self.storage)
         self.memory_governance = memory_governance or MemoryGovernance()
+        self.retrieval_ranker = retrieval_ranker or RetrievalRanker()
         self.working_memory = WorkingMemory(capacity=working_memory_capacity)
         self.tool_executor = tool_executor
         self.gateway = cognitive_gateway or CognitiveGateway(provider=llm_provider)
@@ -60,15 +63,32 @@ class OODACognitiveEngine:
 
     async def retrieve(self, intent: UserIntent) -> List[Dict[str, Any]]:
         query = intent.extracted_query or intent.raw_text
-        context = self.working_memory.get_active_context()
-        recalled = self.recall_engine.retrieve(query=query, working_memory_context=context, limit=self.working_memory.capacity)
-        self.working_memory.admit(recalled)
+        active = self.working_memory.get_active_context()
+        recalled = self.recall_engine.retrieve(query=query, working_memory_context=active, limit=max(self.working_memory.capacity * 3, 20))
+        ranked = self.retrieval_ranker.rank(query, recalled, limit=max(self.working_memory.capacity * 2, 10))
+
+        admitted: List[Dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for note, score in ranked:
+            note_copy = dict(note)
+            note_id = str(note_copy.get("id") or "")
+            if note_id and note_id in seen_ids:
+                continue
+            if note_id:
+                seen_ids.add(note_id)
+            note_copy["retrieval_score"] = round(score.final_score, 6)
+            note_copy["retrieval_reason"] = score.reason
+            admitted.append(note_copy)
+            if len(admitted) >= self.working_memory.capacity:
+                break
+
+        self.working_memory.admit(admitted)
         return self.working_memory.get_active_context()
 
     async def reason_and_plan(self, intent: UserIntent, context: List[Dict[str, Any]]) -> ActivePlan:
         steps: List[PlanStep] = []
         if intent.intent_type == IntentType.QUERY:
-            steps.append(PlanStep(step_id=1, action="synthesize_response", kwargs={"query": intent.raw_text, "context": context}, description="Synthesize knowledge-grounded answer using recalled context"))
+            steps.append(PlanStep(step_id=1, action="synthesize_response", kwargs={"query": intent.raw_text, "context": context}, description="Synthesize knowledge-grounded answer using ranked recalled context"))
         elif intent.intent_type == IntentType.IOT_CONTROL:
             steps.append(PlanStep(step_id=1, action="iot_call", kwargs={"command": intent.raw_text}, description=f"Dispatch IoT Home Assistant control command: '{intent.raw_text}'"))
             steps.append(PlanStep(step_id=2, action="synthesize_response", kwargs={"query": f"Confirm execution of IoT command: {intent.raw_text}", "context": context}, description="Confirm device command completion"))
@@ -85,15 +105,15 @@ class OODACognitiveEngine:
             if step.action == "synthesize_response":
                 query = step.kwargs.get("query", "")
                 ctx = step.kwargs.get("context", [])
-                ctx_text = "\n\n".join([f"- Note [[{c.get('id', '')[:8]}]]: {c.get('content', '')}" for c in ctx])
+                ctx_text = "\n\n".join([f"- Note [[{c.get('id', '')[:8]}]] (score={c.get('retrieval_score', 0):.3f}): {c.get('content', '')}" for c in ctx])
                 system_prompt = (
                     "You are Jarvis, an advanced autonomous cognitive assistant. "
                     "Use the canonical AI Memory Vault operating contract and the relevant recalled memory. "
-                    "Do not invent facts when the memory contract requires verification."
+                    "Prefer higher-ranked evidence, respect confidence/provenance, and do not invent facts when verification is required."
                 )
-                prompt = f"User Request: {query}\n\nRelevant Memory Context:\n{ctx_text}" if ctx_text else query
+                prompt = f"User Request: {query}\n\nRanked Memory Context:\n{ctx_text}" if ctx_text else query
                 response = await self.gateway.generate(prompt, capability="reasoning", system_prompt=system_prompt)
-                res = {"answer": response}
+                res = {"answer": response, "memory_context_count": len(ctx)}
                 step.status = StepStatus.SUCCESS
                 step.result = res
                 return StepExecutionResult(step_id=step.step_id, action=step.action, status="success", result=res, execution_time_ms=(time.time() - t0) * 1000.0)
