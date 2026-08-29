@@ -80,7 +80,7 @@ class CognitiveExecutive:
         self.active_plan = result.active_plan
         self.save_checkpoint()
         if len(result.context_used) >= 2:
-            self._fire_synapses(result.context_used, principal)
+            self._fire_synapses(result.context_used)
         await self._emit_state({
             "active_plan_id": self.active_plan.id if self.active_plan else None,
             "memory_len": len(self.working_memory.entries),
@@ -88,7 +88,8 @@ class CognitiveExecutive:
         })
         return result
 
-    def _fire_synapses(self, context: List[Dict[str, Any]], principal: Principal = Principal.AI_AGENT) -> None:
+    def _fire_synapses(self, context: List[Dict[str, Any]]) -> None:
+        """Create co-activation edges only through the canonical Vault Executive."""
         for i in range(min(3, len(context) - 1)):
             node_a = context[i]
             node_b = context[i + 1]
@@ -97,11 +98,9 @@ class CognitiveExecutive:
             if not id_a or not id_b or id_a == id_b:
                 continue
             try:
-                rels = node_a.get("relations", [])
-                if not any(r.get("target_id") == id_b for r in rels if isinstance(r, dict)):
-                    rels.append({"relation": "co_activated", "target": node_b.get("type", "knowledge"), "target_id": id_b})
-                    self.storage.update(principal, id_a, {"relations": rels})
+                self.gateway.executive.propose_synapse(str(id_a), str(id_b))
             except Exception:
+                # Synapse creation is opportunistic and must never break the cycle.
                 pass
 
     def register_state_callback(self, callback: Callable[[dict], None]) -> None:
