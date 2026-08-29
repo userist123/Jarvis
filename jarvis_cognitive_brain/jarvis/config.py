@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     checkpoint_dir: Path = Field(default=Path(".checkpoints"))
     audit_log_path: Path = Field(default=Path("audit_log.jsonl"))
 
+    allow_iot_control: bool = Field(default=False)
+    allow_code_execution: bool = Field(default=False)
+    allow_network: bool = Field(default=False)
+
     audio_driver: Literal["auto", "sounddevice", "virtual", "mock"] = Field(default="auto")
     audio_sample_rate: int = Field(default=16000)
     tts_sample_rate: int = Field(default=24000)
