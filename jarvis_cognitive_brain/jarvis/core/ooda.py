@@ -11,7 +11,7 @@ from jarvis.memory.sqlite_engine import SQLiteStorageEngine
 from jarvis.memory.recall import MultiSignalRecallEngine
 from jarvis.memory.reflection import ReflexionEngine
 from jarvis.memory.consolidation import ConsolidationEngine
-from jarvis.memory.governance import MemoryGovernance
+from jarvis.memory.memory_governance import MemoryGovernance
 from jarvis.memory.invariants import Principal, Lifecycle, NoteType
 from jarvis.core.models import (
     PerceptionEvent, UserIntent, IntentType, WorkingMemory, ActivePlan,
@@ -108,13 +108,15 @@ class OODACognitiveEngine:
                              "created": time.strftime("%Y-%m-%d"), "updated": time.strftime("%Y-%m-%d"),
                              "provenance": {"source_type": "user", "source_ref": "ooda:memory-store"},
                              "confidence": "high", "verification": "unverified", "content": raw_text, "relations": []}
-                decision = self.memory_governance.evaluate(note_data, existing)
-                if decision.action == "duplicate":
-                    res = {"status": "duplicate", "duplicate_of": decision.duplicate_of, "similarity": decision.similarity, "reason": decision.reason}
+                decision = self.memory_governance.inspect_candidate(note_data, existing)
+                if decision.action == "update":
+                    res = {"status": "duplicate", "matched_id": decision.matched_id, "similarity": decision.similarity, "reason": decision.reason}
+                elif decision.action == "reject":
+                    raise ValueError(decision.reason)
                 else:
                     self.storage.propose(principal, note_data)
                     res = {"note_id": note_id, "status": "review", "governance": decision.action, "reason": decision.reason,
-                           "conflict_with": decision.conflict_with, "similarity": decision.similarity}
+                           "matched_id": decision.matched_id, "similarity": decision.similarity}
                 step.status = StepStatus.SUCCESS
                 step.result = res
                 return StepExecutionResult(step_id=step.step_id, action=step.action, status="success", result=res, execution_time_ms=(time.time() - t0) * 1000.0)
