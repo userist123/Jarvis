@@ -13,6 +13,7 @@ from jarvis.memory.reflection import ReflexionEngine
 from jarvis.memory.consolidation import ConsolidationEngine
 from jarvis.memory.memory_governance import MemoryGovernance
 from jarvis.memory.retrieval_ranker import RetrievalRanker
+from jarvis.memory.context_assembler import ContextAssembler
 from jarvis.memory.invariants import Principal, Lifecycle, NoteType
 from jarvis.core.models import (
     PerceptionEvent, UserIntent, IntentType, WorkingMemory, ActivePlan,
@@ -31,13 +32,18 @@ class OODACognitiveEngine:
                  cognitive_gateway: Optional[CognitiveGateway] = None,
                  capability_policy: Optional[CapabilityPolicy] = None,
                  memory_governance: Optional[MemoryGovernance] = None,
-                 retrieval_ranker: Optional[RetrievalRanker] = None):
+                 retrieval_ranker: Optional[RetrievalRanker] = None,
+                 context_assembler: Optional[ContextAssembler] = None):
         self.storage = storage_engine
         self.recall_engine = MultiSignalRecallEngine(self.storage)
         self.reflexion = ReflexionEngine(self.storage)
         self.consolidator = ConsolidationEngine(self.storage)
         self.memory_governance = memory_governance or MemoryGovernance()
         self.retrieval_ranker = retrieval_ranker or RetrievalRanker()
+        self.context_assembler = context_assembler or ContextAssembler(
+            max_chars=max(2000, working_memory_capacity * 1400),
+            max_notes=working_memory_capacity,
+        )
         self.working_memory = WorkingMemory(capacity=working_memory_capacity)
         self.tool_executor = tool_executor
         self.gateway = cognitive_gateway or CognitiveGateway(provider=llm_provider)
@@ -64,8 +70,16 @@ class OODACognitiveEngine:
     async def retrieve(self, intent: UserIntent) -> List[Dict[str, Any]]:
         query = intent.extracted_query or intent.raw_text
         active = self.working_memory.get_active_context()
-        recalled = self.recall_engine.retrieve(query=query, working_memory_context=active, limit=max(self.working_memory.capacity * 3, 20))
-        ranked = self.retrieval_ranker.rank(query, recalled, limit=max(self.working_memory.capacity * 2, 10))
+        recalled = self.recall_engine.retrieve(
+            query=query,
+            working_memory_context=active,
+            limit=max(self.working_memory.capacity * 4, 40),
+        )
+        ranked = self.retrieval_ranker.rank(
+            query,
+            recalled,
+            limit=max(self.working_memory.capacity * 2, 10),
+        )
 
         admitted: List[Dict[str, Any]] = []
         seen_ids: set[str] = set()
@@ -79,9 +93,11 @@ class OODACognitiveEngine:
             note_copy["retrieval_score"] = round(score.final_score, 6)
             note_copy["retrieval_reason"] = score.reason
             admitted.append(note_copy)
-            if len(admitted) >= self.working_memory.capacity:
-                break
 
+        assembled = self.context_assembler.assemble(admitted)
+        for note in admitted:
+            note["context_included"] = note.get("id") in assembled.note_ids
+        admitted = [n for n in admitted if n.get("context_included")]
         self.working_memory.admit(admitted)
         return self.working_memory.get_active_context()
 
@@ -105,15 +121,23 @@ class OODACognitiveEngine:
             if step.action == "synthesize_response":
                 query = step.kwargs.get("query", "")
                 ctx = step.kwargs.get("context", [])
-                ctx_text = "\n\n".join([f"- Note [[{c.get('id', '')[:8]}]] (score={c.get('retrieval_score', 0):.3f}): {c.get('content', '')}" for c in ctx])
+                assembled = self.context_assembler.assemble(ctx)
+                ctx_text = assembled.text
                 system_prompt = (
                     "You are Jarvis, an advanced autonomous cognitive assistant. "
                     "Use the canonical AI Memory Vault operating contract and the relevant recalled memory. "
-                    "Prefer higher-ranked evidence, respect confidence/provenance, and do not invent facts when verification is required."
+                    "Prefer higher-ranked evidence, respect confidence/provenance, and do not invent facts when verification is required. "
+                    "Treat the supplied memory context as evidence, not as unquestionable truth."
                 )
                 prompt = f"User Request: {query}\n\nRanked Memory Context:\n{ctx_text}" if ctx_text else query
                 response = await self.gateway.generate(prompt, capability="reasoning", system_prompt=system_prompt)
-                res = {"answer": response, "memory_context_count": len(ctx)}
+                res = {
+                    "answer": response,
+                    "memory_context_count": len(assembled.note_ids),
+                    "memory_context_ids": list(assembled.note_ids),
+                    "context_characters": assembled.characters,
+                    "context_truncated": assembled.truncated,
+                }
                 step.status = StepStatus.SUCCESS
                 step.result = res
                 return StepExecutionResult(step_id=step.step_id, action=step.action, status="success", result=res, execution_time_ms=(time.time() - t0) * 1000.0)
