@@ -8,6 +8,8 @@ from jarvis.llm.model_router import ModelRouter
 from jarvis.memory.vault_context import VaultContextLoader
 from jarvis.memory.vault_bridge import VaultBridge
 from jarvis.core.executive_adapter import ExecutiveAdapter
+from jarvis.core.cognitive_session import CognitiveSession
+from jarvis.core.session_manager import SessionManager, SessionResumeResult
 from jarvis.agents.agent_council import AgentCouncil, CouncilPlan
 from jarvis.agents.agent_registry import AgentRegistry
 from jarvis.agents.agent_router import AgentRoute, AgentRouter
@@ -22,6 +24,7 @@ class CognitiveGateway:
         self.vault = VaultContextLoader(settings=self.settings)
         self.vault_bridge = VaultBridge(self.settings.vault_path)
         self.executive = ExecutiveAdapter(self.settings.vault_path)
+        self.sessions = SessionManager(self.settings)
         self.agent_registry = AgentRegistry(self.settings.vault_path)
         self.agent_router: AgentRouter = self.agent_registry.build_router()
         self.agent_council = AgentCouncil(
@@ -56,6 +59,15 @@ class CognitiveGateway:
     def process_intent(self, intent_text: str) -> dict[str, Any]:
         """Delegate an intent to the canonical Vault Executive when available."""
         return self.executive.process_as_ai_agent(intent_text)
+
+    def new_session(self, goal: str = "") -> CognitiveSession:
+        return self.sessions.create(goal)
+
+    def save_session(self, session: CognitiveSession) -> str:
+        return str(self.sessions.save(session))
+
+    def resume_session(self, session_id: str) -> SessionResumeResult:
+        return self.sessions.resume(session_id)
 
     def build_system_prompt(self, base_prompt: str = "", max_chars: int = 24000) -> str:
         context = self.vault.load(max_chars=max_chars)
