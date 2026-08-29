@@ -14,6 +14,7 @@ from jarvis.memory.consolidation import ConsolidationEngine
 from jarvis.memory.memory_governance import MemoryGovernance
 from jarvis.memory.retrieval_ranker import RetrievalRanker
 from jarvis.memory.context_assembler import ContextAssembler
+from jarvis.memory.evidence_chain import EvidenceChain
 from jarvis.memory.invariants import Principal, Lifecycle, NoteType
 from jarvis.core.models import (
     PerceptionEvent, UserIntent, IntentType, WorkingMemory, ActivePlan,
@@ -33,7 +34,8 @@ class OODACognitiveEngine:
                  capability_policy: Optional[CapabilityPolicy] = None,
                  memory_governance: Optional[MemoryGovernance] = None,
                  retrieval_ranker: Optional[RetrievalRanker] = None,
-                 context_assembler: Optional[ContextAssembler] = None):
+                 context_assembler: Optional[ContextAssembler] = None,
+                 evidence_chain: Optional[EvidenceChain] = None):
         self.storage = storage_engine
         self.recall_engine = MultiSignalRecallEngine(self.storage)
         self.reflexion = ReflexionEngine(self.storage)
@@ -44,6 +46,7 @@ class OODACognitiveEngine:
             max_chars=max(2000, working_memory_capacity * 1400),
             max_notes=working_memory_capacity,
         )
+        self.evidence_chain = evidence_chain or EvidenceChain()
         self.working_memory = WorkingMemory(capacity=working_memory_capacity)
         self.tool_executor = tool_executor
         self.gateway = cognitive_gateway or CognitiveGateway(provider=llm_provider)
@@ -122,14 +125,16 @@ class OODACognitiveEngine:
                 query = step.kwargs.get("query", "")
                 ctx = step.kwargs.get("context", [])
                 assembled = self.context_assembler.assemble(ctx)
+                evidence = self.evidence_chain.build(query, ctx)
                 ctx_text = assembled.text
                 system_prompt = (
                     "You are Jarvis, an advanced autonomous cognitive assistant. "
                     "Use the canonical AI Memory Vault operating contract and the relevant recalled memory. "
                     "Prefer higher-ranked evidence, respect confidence/provenance, and do not invent facts when verification is required. "
-                    "Treat the supplied memory context as evidence, not as unquestionable truth."
+                    "Treat the supplied memory context as evidence, not as unquestionable truth. "
+                    f"Evidence status: {evidence.status}."
                 )
-                prompt = f"User Request: {query}\n\nRanked Memory Context:\n{ctx_text}" if ctx_text else query
+                prompt = f"User Request: {query}\n\nEvidence Status: {evidence.status}\n\nRanked Memory Context:\n{ctx_text}" if ctx_text else query
                 response = await self.gateway.generate(prompt, capability="reasoning", system_prompt=system_prompt)
                 res = {
                     "answer": response,
@@ -137,6 +142,9 @@ class OODACognitiveEngine:
                     "memory_context_ids": list(assembled.note_ids),
                     "context_characters": assembled.characters,
                     "context_truncated": assembled.truncated,
+                    "evidence_status": evidence.status,
+                    "evidence_ids": [item.note_id for item in evidence.evidence],
+                    "conflict_ids": list(evidence.conflicts),
                 }
                 step.status = StepStatus.SUCCESS
                 step.result = res
