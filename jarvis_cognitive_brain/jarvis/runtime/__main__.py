@@ -21,9 +21,10 @@ def main() -> int:
     chat_cmd.add_argument("--reset", action="store_true", help="Reset the selected local chat session first")
     chat_cmd.add_argument("--stream", action="store_true", help="Stream the Ollama response")
 
+    gui_cmd = sub.add_parser("gui", help="Start the Tkinter desktop runtime")
+
     args = parser.parse_args()
 
-    # Backwards compatibility: `python -m jarvis.runtime --json` remains a status check.
     if args.command is None:
         args.command = "status"
         args.as_json = False
@@ -37,6 +38,10 @@ def main() -> int:
             print("====================")
             print(format_status(status))
         return 0 if status.ollama_healthy and status.vault_present else 1
+
+    if args.command == "gui":
+        from jarvis.runtime.gui import main as gui_main
+        return gui_main()
 
     runtime = ChatRuntime(session_id=args.session)
     if args.reset:
