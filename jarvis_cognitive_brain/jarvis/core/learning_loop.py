@@ -1,0 +1,43 @@
+from __future__ import annotations
+
+from typing import Any, Mapping, Optional
+
+from jarvis.core.reflection_engine import ReflectionEngine, ReflectionResult
+from jarvis.memory.vault_bridge import VaultBridge
+
+
+class LearningLoop:
+    """Post-action learning loop with explicit REVIEW-only persistence."""
+
+    def __init__(self, vault_bridge: VaultBridge, reflection: Optional[ReflectionEngine] = None) -> None:
+        self.vault = vault_bridge
+        self.reflection = reflection or ReflectionEngine()
+
+    def learn(
+        self,
+        *,
+        goal: str,
+        expected: str,
+        observation: Mapping[str, Any],
+        evidence_ids: tuple[str, ...] = (),
+    ) -> tuple[ReflectionResult, Any]:
+        result = self.reflection.reflect(
+            goal=goal,
+            expected=expected,
+            observation=observation,
+            evidence_ids=evidence_ids,
+        )
+        proposal = {
+            "title": f"JARVIS {'lesson' if result.success else 'error'}: {goal}",
+            "content": result.lesson,
+            "type": result.memory_type,
+            "lifecycle": "REVIEW",
+            "verification": "unverified",
+            "provenance": {
+                "source_type": "ai",
+                "source_ref": "jarvis.reflection_engine",
+                "evidence_ids": list(result.evidence_ids),
+            },
+        }
+        persisted = self.vault.propose_memory(proposal)
+        return result, persisted
