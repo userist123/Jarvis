@@ -48,7 +48,7 @@ class CognitiveGateway:
         return routes, plan
 
     def search_vault(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
-        """Use the native Vault backend when explicitly available; otherwise return no direct results."""
+        """Search native Vault memory when available; otherwise return no native hits."""
         return self.vault_bridge.search_memory(query, limit=limit)
 
     def build_system_prompt(self, base_prompt: str = "", max_chars: int = 24000) -> str:
