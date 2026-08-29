@@ -13,30 +13,21 @@ from jarvis.memory.reflection import ReflexionEngine
 from jarvis.memory.consolidation import ConsolidationEngine
 from jarvis.memory.invariants import Principal, Lifecycle, NoteType
 from jarvis.core.models import (
-    PerceptionEvent,
-    UserIntent,
-    IntentType,
-    WorkingMemory,
-    ActivePlan,
-    PlanStep,
-    StepStatus,
-    StepExecutionResult,
-    OODACycleResult,
+    PerceptionEvent, UserIntent, IntentType, WorkingMemory, ActivePlan,
+    PlanStep, StepStatus, StepExecutionResult, OODACycleResult,
 )
 from jarvis.core.cognitive_gateway import CognitiveGateway
+from jarvis.core.capability_policy import Capability, CapabilityPolicy
 
 
 class OODACognitiveEngine:
     """Stateful OODA loop executing discrete cognitive cycles."""
 
-    def __init__(
-        self,
-        llm_provider: Optional[BaseLLMProvider],
-        storage_engine: SQLiteStorageEngine,
-        working_memory_capacity: int = 10,
-        tool_executor: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
-        cognitive_gateway: Optional[CognitiveGateway] = None,
-    ):
+    def __init__(self, llm_provider: Optional[BaseLLMProvider], storage_engine: SQLiteStorageEngine,
+                 working_memory_capacity: int = 10,
+                 tool_executor: Optional[Callable[[str, Dict[str, Any]], Any]] = None,
+                 cognitive_gateway: Optional[CognitiveGateway] = None,
+                 capability_policy: Optional[CapabilityPolicy] = None):
         self.storage = storage_engine
         self.recall_engine = MultiSignalRecallEngine(self.storage)
         self.reflexion = ReflexionEngine(self.storage)
@@ -45,35 +36,26 @@ class OODACognitiveEngine:
         self.tool_executor = tool_executor
         self.gateway = cognitive_gateway or CognitiveGateway(provider=llm_provider)
         self.llm = llm_provider or self.gateway.provider("reasoning")
+        self.policy = capability_policy or CapabilityPolicy()
 
     async def observe(self, perception: PerceptionEvent) -> UserIntent:
-        """Observe phase: Parse raw sensory input and classify user intent."""
         text = perception.raw_data.strip()
         lowered = text.lower()
-
         if any(w in lowered for w in ["turn on", "turn off", "set brightness", "set temperature", "light", "switch"]):
-            intent_type = IntentType.IOT_CONTROL
-            requires_tool = True
+            intent_type, requires_tool = IntentType.IOT_CONTROL, True
         elif any(w in lowered for w in ["remember", "store note", "save memory", "keep note"]):
-            intent_type = IntentType.MEMORY_STORE
-            requires_tool = True
+            intent_type, requires_tool = IntentType.MEMORY_STORE, True
         elif any(w in lowered for w in ["status", "system health", "cpu", "diagnostic"]):
-            intent_type = IntentType.SYSTEM_STATUS
-            requires_tool = False
+            intent_type, requires_tool = IntentType.SYSTEM_STATUS, False
         elif any(w in lowered for w in ["plan", "step by step", "execute task", "workflow"]):
-            intent_type = IntentType.TASK
-            requires_tool = True
+            intent_type, requires_tool = IntentType.TASK, True
         elif any(w in lowered for w in ["what", "how", "who", "when", "why", "search", "lookup", "find", "explain"]):
-            intent_type = IntentType.QUERY
-            requires_tool = False
+            intent_type, requires_tool = IntentType.QUERY, False
         else:
-            intent_type = IntentType.CONVERSATION
-            requires_tool = False
-
+            intent_type, requires_tool = IntentType.CONVERSATION, False
         return UserIntent(raw_text=text, intent_type=intent_type, requires_tool=requires_tool, extracted_query=text, confidence=0.95)
 
     async def retrieve(self, intent: UserIntent) -> List[Dict[str, Any]]:
-        """Retrieve phase: Multi-signal associative recall admitted to working memory."""
         query = intent.extracted_query or intent.raw_text
         context = self.working_memory.get_active_context()
         recalled = self.recall_engine.retrieve(query=query, working_memory_context=context, limit=self.working_memory.capacity)
@@ -81,7 +63,6 @@ class OODACognitiveEngine:
         return self.working_memory.get_active_context()
 
     async def reason_and_plan(self, intent: UserIntent, context: List[Dict[str, Any]]) -> ActivePlan:
-        """Reason & Plan phase: Generate structured multi-step plan based on intent and memory."""
         steps: List[PlanStep] = []
         if intent.intent_type == IntentType.QUERY:
             steps.append(PlanStep(step_id=1, action="synthesize_response", kwargs={"query": intent.raw_text, "context": context}, description="Synthesize knowledge-grounded answer using recalled context"))
@@ -95,7 +76,6 @@ class OODACognitiveEngine:
         return ActivePlan(goal=intent.raw_text, steps=steps)
 
     async def act_step(self, step: PlanStep, principal: Principal = Principal.AI_AGENT) -> StepExecutionResult:
-        """Act phase: Execute an individual plan step."""
         t0 = time.time()
         step.status = StepStatus.RUNNING
         try:
@@ -116,22 +96,14 @@ class OODACognitiveEngine:
                 return StepExecutionResult(step_id=step.step_id, action=step.action, status="success", result=res, execution_time_ms=(time.time() - t0) * 1000.0)
 
             if step.action == "propose_memory":
+                self.policy.require(Capability.WRITE_MEMORY)
                 raw_text = step.kwargs.get("raw_text", "")
                 note_id = str(uuid.uuid4())
-                note_data = {
-                    "id": note_id,
-                    "type": NoteType.KNOWLEDGE.value,
-                    "lifecycle": Lifecycle.REVIEW.value,
-                    "category": "user-memory",
-                    "tags": ["memory-store", "user-instruction"],
-                    "created": time.strftime("%Y-%m-%d"),
-                    "updated": time.strftime("%Y-%m-%d"),
-                    "provenance": {"source_type": "inference", "source_ref": "user-instruction"},
-                    "confidence": "high",
-                    "verification": "unverified",
-                    "content": raw_text,
-                    "relations": [],
-                }
+                note_data = {"id": note_id, "type": NoteType.KNOWLEDGE.value, "lifecycle": Lifecycle.REVIEW.value,
+                             "category": "user-memory", "tags": ["memory-store", "user-instruction"],
+                             "created": time.strftime("%Y-%m-%d"), "updated": time.strftime("%Y-%m-%d"),
+                             "provenance": {"source_type": "inference", "source_ref": "user-instruction"},
+                             "confidence": "high", "verification": "unverified", "content": raw_text, "relations": []}
                 self.storage.propose(principal, note_data)
                 res = {"note_id": note_id, "status": "proposed"}
                 step.status = StepStatus.SUCCESS
@@ -139,12 +111,14 @@ class OODACognitiveEngine:
                 return StepExecutionResult(step_id=step.step_id, action=step.action, status="success", result=res, execution_time_ms=(time.time() - t0) * 1000.0)
 
             if step.action == "iot_call":
+                self.policy.require(Capability.IOT_CONTROL)
                 tool_res = self.tool_executor("iot_call", step.kwargs) if self.tool_executor else {"device": "home_assistant", "status": "executed", "command": step.kwargs.get("command")}
                 step.status = StepStatus.SUCCESS
                 step.result = tool_res
                 return StepExecutionResult(step_id=step.step_id, action=step.action, status="success", result=tool_res, execution_time_ms=(time.time() - t0) * 1000.0)
 
             if self.tool_executor:
+                self.policy.require(Capability.EXECUTE_CODE)
                 tool_res = self.tool_executor(step.action, step.kwargs)
                 step.status = StepStatus.SUCCESS
                 step.result = tool_res
@@ -163,8 +137,7 @@ class OODACognitiveEngine:
                 break
             res = await self.act_step(step, principal=principal)
             results.append(res)
-            if res.status == "success":
-                plan.complete_current_step(res.result)
+            if res.status == "success": plan.complete_current_step(res.result)
             else:
                 plan.fail_current_step(res.error or "Unknown error")
                 break
@@ -186,14 +159,13 @@ class OODACognitiveEngine:
     async def consolidate(self, lesson_note: Optional[Dict[str, Any]] = None, principal: Principal = Principal.AI_AGENT) -> Optional[str]:
         if lesson_note:
             try:
+                self.policy.require(Capability.WRITE_MEMORY)
                 self.storage.propose(principal, lesson_note)
                 return lesson_note.get("id")
             except Exception:
                 return None
-        try:
-            return self.consolidator.consolidate_lessons(principal)
-        except Exception:
-            return None
+        try: return self.consolidator.consolidate_lessons(principal)
+        except Exception: return None
 
     async def process_cycle(self, perception_or_text: Union[PerceptionEvent, str], principal: Principal = Principal.AI_AGENT, **kwargs: Any) -> OODACycleResult:
         perception = PerceptionEvent(channel="voice", raw_data=perception_or_text) if isinstance(perception_or_text, str) else perception_or_text
@@ -204,29 +176,23 @@ class OODACognitiveEngine:
         intent = await self.observe(perception)
         context = await self.retrieve(intent)
         plan = await self.reason_and_plan(intent, context)
-        if auto_checkpoint_callback:
-            auto_checkpoint_callback()
-
+        if auto_checkpoint_callback: auto_checkpoint_callback()
         step_results: List[StepExecutionResult] = []
         reflections: List[str] = []
         while not plan.is_complete():
             step = plan.get_next_step()
-            if not step:
-                break
+            if not step: break
             result = await self.act_step(step, principal=principal)
             step_results.append(result)
-            if result.status == "success":
-                plan.complete_current_step(result.result)
+            if result.status == "success": plan.complete_current_step(result.result)
             else:
                 plan.fail_current_step(result.error or "Unknown error")
                 reflection_id = await self.reflect(step, result.error or "Unknown error", principal=principal)
-                if reflection_id:
-                    reflections.append(reflection_id)
+                if reflection_id: reflections.append(reflection_id)
                 break
-            if auto_checkpoint_callback:
-                auto_checkpoint_callback()
-
+            if auto_checkpoint_callback: auto_checkpoint_callback()
         consolidated_id = await self.consolidate(principal=principal)
-        consolidated_ids = [consolidated_id] if consolidated_id else []
         total_ms = (time.time() - start_time) * 1000.0
-        return OODACycleResult(perception=perception, intent=intent, active_plan=plan, step_results=step_results, context_used=context, reflections=reflections, consolidated_ids=consolidated_ids, execution_time_ms=total_ms)
+        return OODACycleResult(perception=perception, intent=intent, active_plan=plan, step_results=step_results,
+                               context_used=context, reflections=reflections,
+                               consolidated_ids=[consolidated_id] if consolidated_id else [], execution_time_ms=total_ms)
