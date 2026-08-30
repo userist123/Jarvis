@@ -36,25 +36,42 @@ class LearningCase:
     first_observed_at: str = ""
     last_observed_at: str = ""
     knowledge_times: set[str] = field(default_factory=set)
+    observations: list[dict[str, Any]] = field(default_factory=list)
 
     def add(self, observation: Mapping[str, Any]) -> None:
-        self.occurrences += 1
-        self.evidence_ids.update(str(x) for x in (observation.get("evidence_ids") or ()) if x)
-        execution_id = observation.get("execution_id")
-        if execution_id:
-            self.execution_ids.add(str(execution_id))
-        status = observation.get("status")
-        if status:
-            normalized = str(status)
-            self.statuses.add(normalized)
-            self.outcome_counts[normalized] = self.outcome_counts.get(normalized, 0) + 1
         observed_at = str(observation.get("observed_at") or _now())
-        if not self.first_observed_at:
+        known_at = observation.get("known_as_of") or observation.get("knowledge_time") or observed_at
+        status = str(observation.get("status") or "unknown")
+        evidence = tuple(str(x) for x in (observation.get("evidence_ids") or ()) if x)
+        execution_id = str(observation.get("execution_id") or "")
+
+        self.occurrences += 1
+        self.evidence_ids.update(evidence)
+        if execution_id:
+            self.execution_ids.add(execution_id)
+        self.statuses.add(status)
+        self.outcome_counts[status] = self.outcome_counts.get(status, 0) + 1
+        self.knowledge_times.add(str(known_at))
+        if not self.first_observed_at or observed_at < self.first_observed_at:
             self.first_observed_at = observed_at
-        self.last_observed_at = observed_at
-        known_at = observation.get("known_as_of") or observation.get("knowledge_time")
-        if known_at:
-            self.knowledge_times.add(str(known_at))
+        if not self.last_observed_at or observed_at > self.last_observed_at:
+            self.last_observed_at = observed_at
+
+        self.observations.append({
+            "observed_at": observed_at,
+            "knowledge_time": str(known_at),
+            "status": status,
+            "evidence_ids": list(evidence),
+            "execution_id": execution_id or None,
+        })
+
+    def snapshot_observations(self, *, as_of: str | datetime | None = None, known_as_of: str | datetime | None = None) -> list[dict[str, Any]]:
+        from .temporal_learning import observation_visible_at
+        return [
+            dict(item)
+            for item in self.observations
+            if observation_visible_at(item, as_of=as_of, known_as_of=known_as_of)
+        ]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -71,6 +88,7 @@ class LearningCase:
             "first_observed_at": self.first_observed_at,
             "last_observed_at": self.last_observed_at,
             "knowledge_times": sorted(self.knowledge_times),
+            "observations": list(self.observations),
         }
 
 
