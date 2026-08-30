@@ -76,8 +76,27 @@ class CognitiveGateway:
     def apply_conflict_verdict(self, *, principal: str, verdict: dict[str, Any], evidence_verification: dict[str, Any], action: str, reason: str) -> dict[str, Any]:
         return self.conflict_reviews.apply_verdict(principal=principal, verdict=verdict, evidence_verification=evidence_verification, action=action, reason=reason)
 
-    def promote_learning_candidate(self, *, principal: str, reviewer: str, memory_id: str, evidence_verification: dict[str, Any], evidence_bundle_hash: str) -> dict[str, Any]:
-        return self.conflict_reviews.promote_learning_candidate(principal=principal, reviewer=reviewer, memory_id=memory_id, evidence_verification=evidence_verification, evidence_bundle_hash=evidence_bundle_hash)
+    def promote_learning_candidate(
+        self,
+        *,
+        principal: str,
+        reviewer: str,
+        memory_id: str,
+        evidence_verification: dict[str, Any],
+        evidence_bundle_hash: str,
+        confidence: dict[str, Any],
+        confidence_snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Promote a learning candidate through the canonical bound-confidence gate."""
+        return self.conflict_reviews.promote_learning_candidate(
+            principal=principal,
+            reviewer=reviewer,
+            memory_id=memory_id,
+            evidence_verification=evidence_verification,
+            evidence_bundle_hash=evidence_bundle_hash,
+            confidence=confidence,
+            confidence_snapshot=confidence_snapshot,
+        )
 
     def process_intent(self, intent_text: str) -> dict[str, Any]:
         return self.executive.process_as_ai_agent(intent_text)
