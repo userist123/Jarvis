@@ -14,6 +14,7 @@ from jarvis.core.cognitive_session import CognitiveSession
 from jarvis.core.session_manager import SessionManager, SessionResumeResult
 from jarvis.core.learning_loop import LearningLoop
 from jarvis.core.reflection_engine import ReflectionResult
+from jarvis.runtime.conflict_review import ConflictReviewService
 from jarvis.agents.agent_council import AgentCouncil, CouncilPlan
 from jarvis.agents.agent_registry import AgentRegistry
 from jarvis.agents.agent_router import AgentRoute, AgentRouter
@@ -30,6 +31,7 @@ class CognitiveGateway:
         self.executive = ExecutiveAdapter(self.settings.vault_path)
         self.sessions = SessionManager(self.settings)
         self.learning = LearningLoop(self.vault_bridge)
+        self.conflict_reviews = ConflictReviewService(self.vault_bridge)
         self.agent_registry = AgentRegistry(self.settings.vault_path)
         self.agent_router: AgentRouter = self.agent_registry.build_router()
         self.agent_council = AgentCouncil(
@@ -65,15 +67,11 @@ class CognitiveGateway:
         as_of: date | str | None = None,
         known_as_of: date | str | None = None,
     ) -> list[dict[str, Any]]:
-        """Search canonical Vault memory with optional bitemporal filtering."""
         temporal = TemporalQuery.from_values(as_of=as_of, known_as_of=known_as_of)
         if temporal.as_of is None and temporal.known_as_of is None:
             return self.vault_bridge.search_memory(query, limit=limit)
         results = self.vault_bridge.search_memory_temporal(
-            query,
-            limit=limit,
-            as_of=temporal.as_of,
-            known_as_of=temporal.known_as_of,
+            query, limit=limit, as_of=temporal.as_of, known_as_of=temporal.known_as_of
         )
         return list(filter_temporal(results, temporal))
 
@@ -85,22 +83,39 @@ class CognitiveGateway:
         as_of: date | str | None = None,
         known_as_of: date | str | None = None,
     ) -> dict[str, Any]:
-        """Return results plus temporal/conflict metadata for UI and grounding."""
         temporal = TemporalQuery.from_values(as_of=as_of, known_as_of=known_as_of)
         if temporal.as_of is None and temporal.known_as_of is None:
             return {"results": self.vault_bridge.search_memory(query, limit=limit), "temporal": None, "conflicts": []}
         pack = self.vault_bridge.search_memory_temporal_pack(
-            query,
-            limit=limit,
-            as_of=temporal.as_of,
-            known_as_of=temporal.known_as_of,
+            query, limit=limit, as_of=temporal.as_of, known_as_of=temporal.known_as_of
         )
         results = list(pack.get("results", pack.get("items", [])))
+        filtered = list(filter_temporal(results, temporal))
         return {
-            "results": list(filter_temporal(results, temporal)),
+            "results": filtered,
             "temporal": pack.get("temporal"),
             "conflicts": list((pack.get("temporal") or {}).get("conflicts", [])),
         }
+
+    def open_conflict_review(
+        self,
+        *,
+        memory_ids: tuple[str, ...] | list[str],
+        reasons: tuple[str, ...] | list[str],
+        conflict_type: str = "semantic",
+        evidence_ids: tuple[str, ...] | list[str] = (),
+        as_of: date | str | None = None,
+        known_as_of: date | str | None = None,
+    ) -> dict[str, Any]:
+        """Open an auditable review case; does not resolve or mutate memory."""
+        return self.conflict_reviews.open_case(
+            memory_ids=memory_ids,
+            reasons=reasons,
+            conflict_type=conflict_type,
+            evidence_ids=evidence_ids,
+            as_of=as_of,
+            known_as_of=known_as_of,
+        )
 
     def process_intent(self, intent_text: str) -> dict[str, Any]:
         return self.executive.process_as_ai_agent(intent_text)
