@@ -46,34 +46,16 @@ class NativeMemoryControllerBackend:
         pack = self.controller.search(self.principal, query, page_size=max(1, min(limit, 100)))
         return list(pack.get("results", pack.get("items", [])))
 
-    def search_memory_temporal_pack(
-        self,
-        query: str,
-        limit: int = 20,
-        *,
-        as_of: Any = None,
-        known_as_of: Any = None,
-    ) -> dict[str, Any]:
+    def search_memory_temporal_pack(self, query: str, limit: int = 20, *, as_of: Any = None, known_as_of: Any = None) -> dict[str, Any]:
         if self._temporal_controller is None:
             if as_of is not None or known_as_of is not None:
                 raise RuntimeError("Temporal Vault controller is unavailable")
             return {"results": self.search_memory(query, limit=limit), "temporal": None}
         return self._temporal_controller.search(
-            self.principal,
-            query,
-            page_size=max(1, min(limit, 100)),
-            as_of=as_of,
-            known_as_of=known_as_of,
+            self.principal, query, page_size=max(1, min(limit, 100)), as_of=as_of, known_as_of=known_as_of
         )
 
-    def search_memory_temporal(
-        self,
-        query: str,
-        limit: int = 20,
-        *,
-        as_of: Any = None,
-        known_as_of: Any = None,
-    ) -> list[dict[str, Any]]:
+    def search_memory_temporal(self, query: str, limit: int = 20, *, as_of: Any = None, known_as_of: Any = None) -> list[dict[str, Any]]:
         pack = self.search_memory_temporal_pack(query, limit=limit, as_of=as_of, known_as_of=known_as_of)
         return list(pack.get("results", pack.get("items", [])))
 
@@ -125,14 +107,7 @@ class VaultBridge:
             return []
         return list(self._backend.search_memory(query, limit=limit))
 
-    def search_memory_temporal_pack(
-        self,
-        query: str,
-        limit: int = 20,
-        *,
-        as_of: Any = None,
-        known_as_of: Any = None,
-    ) -> dict[str, Any]:
+    def search_memory_temporal_pack(self, query: str, limit: int = 20, *, as_of: Any = None, known_as_of: Any = None) -> dict[str, Any]:
         if not self._backend:
             return {"results": [], "temporal": None}
         method = getattr(self._backend, "search_memory_temporal_pack", None)
@@ -141,23 +116,18 @@ class VaultBridge:
         results = self.search_memory(query, limit=limit)
         from jarvis.runtime.temporal import TemporalQuery, filter_temporal
         temporal = TemporalQuery.from_values(as_of, known_as_of)
+        if temporal.as_of is None and temporal.known_as_of is None:
+            return {"results": results, "temporal": None}
         return {
-            "results": list(filter_temporal(results, temporal)) if temporal.as_of or temporal.known_as_of else results,
+            "results": list(filter_temporal(results, temporal)),
             "temporal": {
                 "as_of": temporal.as_of.isoformat() if temporal.as_of else None,
                 "known_as_of": temporal.known_as_of.isoformat() if temporal.known_as_of else None,
                 "filter_stage": "jarvis-fallback",
-            } if temporal.as_of or temporal.known_as_of else None,
+            },
         }
 
-    def search_memory_temporal(
-        self,
-        query: str,
-        limit: int = 20,
-        *,
-        as_of: Any = None,
-        known_as_of: Any = None,
-    ) -> list[dict[str, Any]]:
+    def search_memory_temporal(self, query: str, limit: int = 20, *, as_of: Any = None, known_as_of: Any = None) -> list[dict[str, Any]]:
         pack = self.search_memory_temporal_pack(query, limit=limit, as_of=as_of, known_as_of=known_as_of)
         return list(pack.get("results", pack.get("items", [])))
 
