@@ -10,6 +10,7 @@ from jarvis.memory.vault_context import VaultContextLoader
 from jarvis.memory.vault_bridge import VaultBridge
 from jarvis.runtime.temporal import TemporalQuery, filter_temporal
 from jarvis.runtime.learning_review_filters import build_filtered_queue
+from jarvis.runtime.learning_review_session import LearningReviewSessionService
 from jarvis.core.executive_adapter import ExecutiveAdapter
 from jarvis.core.cognitive_session import CognitiveSession
 from jarvis.core.session_manager import SessionManager, SessionResumeResult
@@ -33,6 +34,7 @@ class CognitiveGateway:
         self.sessions = SessionManager(self.settings)
         self.learning = LearningLoop(self.vault_bridge)
         self.learning_store = self.learning.store
+        self.learning_review_queue_service = LearningReviewSessionService(self.learning_store)
         self.conflict_reviews = ConflictReviewService(self.vault_bridge)
         self.agent_registry = AgentRegistry(self.settings.vault_path)
         self.agent_router: AgentRouter = self.agent_registry.build_router()
@@ -63,25 +65,13 @@ class CognitiveGateway:
         filtered = list(filter_temporal(results, temporal))
         return {"results": filtered, "temporal": pack.get("temporal"), "conflicts": list((pack.get("temporal") or {}).get("conflicts", []))}
 
-    def learning_review_queue(
-        self,
-        *,
-        risk: str | None = None,
-        promotable: bool | None = None,
-        min_confidence: float | None = None,
-        as_of: date | str | None = None,
-        known_as_of: date | str | None = None,
-    ) -> list[dict[str, Any]]:
+    def learning_review_queue(self, *, risk: str | None = None, promotable: bool | None = None, min_confidence: float | None = None, as_of: date | str | None = None, known_as_of: date | str | None = None) -> list[dict[str, Any]]:
         """Return a read-only, optionally temporal review queue."""
-        items = build_filtered_queue(
-            self.learning_store.records(),
-            risk=risk,
-            promotable=promotable,
-            min_confidence=min_confidence,
-            as_of=as_of,
-            known_as_of=known_as_of,
-        )
-        return [item.as_dict() for item in items]
+        return [item.as_dict() for item in build_filtered_queue(self.learning_store.records(), risk=risk, promotable=promotable, min_confidence=min_confidence, as_of=as_of, known_as_of=known_as_of)]
+
+    def open_learning_review_session(self, case_id: str, *, as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
+        """Open a complete read-only learning review dossier."""
+        return self.learning_review_queue_service.open(case_id, as_of=as_of, known_as_of=known_as_of).as_dict()
 
     def open_conflict_review(self, *, memory_ids: tuple[str, ...] | list[str], reasons: tuple[str, ...] | list[str], conflict_type: str = "semantic", evidence_ids: tuple[str, ...] | list[str] = (), as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
         return self.conflict_reviews.open_case(memory_ids=memory_ids, reasons=reasons, conflict_type=conflict_type, evidence_ids=evidence_ids, as_of=as_of, known_as_of=known_as_of)
@@ -98,27 +88,8 @@ class CognitiveGateway:
     def apply_conflict_verdict(self, *, principal: str, verdict: dict[str, Any], evidence_verification: dict[str, Any], action: str, reason: str) -> dict[str, Any]:
         return self.conflict_reviews.apply_verdict(principal=principal, verdict=verdict, evidence_verification=evidence_verification, action=action, reason=reason)
 
-    def promote_learning_candidate(
-        self,
-        *,
-        principal: str,
-        reviewer: str,
-        memory_id: str,
-        evidence_verification: dict[str, Any],
-        evidence_bundle_hash: str,
-        confidence: dict[str, Any],
-        confidence_snapshot: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Promote a learning candidate through the canonical bound-confidence gate."""
-        return self.conflict_reviews.promote_learning_candidate(
-            principal=principal,
-            reviewer=reviewer,
-            memory_id=memory_id,
-            evidence_verification=evidence_verification,
-            evidence_bundle_hash=evidence_bundle_hash,
-            confidence=confidence,
-            confidence_snapshot=confidence_snapshot,
-        )
+    def promote_learning_candidate(self, *, principal: str, reviewer: str, memory_id: str, evidence_verification: dict[str, Any], evidence_bundle_hash: str, confidence: dict[str, Any], confidence_snapshot: dict[str, Any]) -> dict[str, Any]:
+        return self.conflict_reviews.promote_learning_candidate(principal=principal, reviewer=reviewer, memory_id=memory_id, evidence_verification=evidence_verification, evidence_bundle_hash=evidence_bundle_hash, confidence=confidence, confidence_snapshot=confidence_snapshot)
 
     def process_intent(self, intent_text: str) -> dict[str, Any]:
         return self.executive.process_as_ai_agent(intent_text)
