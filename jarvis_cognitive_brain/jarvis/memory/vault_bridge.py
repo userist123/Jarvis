@@ -35,9 +35,34 @@ class NativeMemoryControllerBackend:
         storage = storage_module.FileStorageEngine(str(vault_root))
         self.controller = controller_module.MemoryController(storage)
         self.principal = authorizer_module.Principal.AI_AGENT
+        self._temporal_controller = None
+        try:
+            temporal_module = importlib.import_module("memory_controller.temporal_controller")
+            self._temporal_controller = temporal_module.TemporalMemoryController(self.controller)
+        except Exception:
+            self._temporal_controller = None
 
     def search_memory(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         pack = self.controller.search(self.principal, query, page_size=max(1, min(limit, 100)))
+        return list(pack.get("results", pack.get("items", [])))
+
+    def search_memory_temporal(
+        self,
+        query: str,
+        limit: int = 20,
+        *,
+        as_of: Any = None,
+        known_as_of: Any = None,
+    ) -> list[dict[str, Any]]:
+        if self._temporal_controller is None:
+            return self.search_memory(query, limit=limit)
+        pack = self._temporal_controller.search(
+            self.principal,
+            query,
+            page_size=max(1, min(limit, 100)),
+            as_of=as_of,
+            known_as_of=known_as_of,
+        )
         return list(pack.get("results", pack.get("items", [])))
 
     def related_memory(self, note_id: str, limit: int = 20) -> list[dict[str, Any]]:
@@ -88,16 +113,24 @@ class VaultBridge:
             return []
         return list(self._backend.search_memory(query, limit=limit))
 
-    def search_memory_temporal(self, query: str, limit: int = 20, *, temporal_filter=None) -> list[dict[str, Any]]:
-        """Search through the native controller, then optionally apply an as_of filter.
-
-        The native Vault currently does not expose an as_of query parameter, so
-        temporal filtering is intentionally a second-stage JARVIS concern.
-        """
+    def search_memory_temporal(
+        self,
+        query: str,
+        limit: int = 20,
+        *,
+        as_of: Any = None,
+        known_as_of: Any = None,
+    ) -> list[dict[str, Any]]:
+        if not self._backend:
+            return []
+        method = getattr(self._backend, "search_memory_temporal", None)
+        if callable(method):
+            return list(method(query, limit=limit, as_of=as_of, known_as_of=known_as_of))
         results = self.search_memory(query, limit=limit)
-        if temporal_filter is None:
+        if as_of is None and known_as_of is None:
             return results
-        return list(temporal_filter(results))
+        from jarvis.runtime.temporal import TemporalQuery, filter_temporal
+        return list(filter_temporal(results, TemporalQuery.from_values(as_of, known_as_of)))
 
     def related_memory(self, note_id: str, limit: int = 20) -> list[dict[str, Any]]:
         if not self._backend:
