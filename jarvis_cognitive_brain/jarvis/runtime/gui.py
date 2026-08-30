@@ -9,6 +9,7 @@ from tkinter.scrolledtext import ScrolledText
 from jarvis.config import Settings, get_settings
 from jarvis.runtime.bootstrap import diagnose
 from jarvis.runtime.chat import ChatRuntime
+from jarvis.runtime.reviewer_ui import open_reviewer_window
 
 
 class JarvisApp(tk.Tk):
@@ -21,6 +22,7 @@ class JarvisApp(tk.Tk):
         self.geometry("1240x780")
         self.minsize(920, 600)
         self.configure(padx=12, pady=12)
+        self._reviewer_window: tk.Toplevel | None = None
 
         self.chat = ChatRuntime(self.settings)
         self.status = tk.StringVar(value="Starting...")
@@ -89,7 +91,8 @@ class JarvisApp(tk.Tk):
         self._info_row(right, "Session", self.session)
 
         ttk.Separator(right).pack(fill="x", pady=12)
-        ttk.Button(right, text="New session", command=self._reset).pack(fill="x")
+        ttk.Button(right, text="Open Memory Review", command=self._open_reviewer).pack(fill="x")
+        ttk.Button(right, text="New session", command=self._reset).pack(fill="x", pady=(6, 0))
         ttk.Button(right, text="Refresh status", command=self._refresh_status).pack(fill="x", pady=(6, 0))
 
     @staticmethod
@@ -171,6 +174,19 @@ class JarvisApp(tk.Tk):
             self.plan_state.set(str(metadata.get("council") or "single-agent"))
         self.send.configure(state="normal")
         self.status.set("Ready")
+
+    def _open_reviewer(self) -> None:
+        if self._reviewer_window is not None and self._reviewer_window.winfo_exists():
+            self._reviewer_window.lift()
+            self._reviewer_window.focus_force()
+            return
+        self._reviewer_window = open_reviewer_window(self, self.chat.gateway)
+        self._reviewer_window.protocol("WM_DELETE_WINDOW", self._close_reviewer)
+
+    def _close_reviewer(self) -> None:
+        if self._reviewer_window is not None:
+            self._reviewer_window.destroy()
+        self._reviewer_window = None
 
     def _reset(self) -> None:
         self.chat.reset()
