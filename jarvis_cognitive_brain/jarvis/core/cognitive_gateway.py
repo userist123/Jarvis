@@ -88,6 +88,12 @@ class CognitiveGateway:
     def verify_conflict_evidence(self, *, bundle: dict[str, Any]) -> dict[str, Any]:
         return self.conflict_reviews.verify_evidence(bundle=bundle)
 
+    def verify_and_advance_conflict_review(self, *, bundle: dict[str, Any]) -> dict[str, Any]:
+        """Verify evidence and automatically advance only safe review states."""
+        verification = self.conflict_reviews.verify_evidence(bundle=bundle)
+        case_id = str(bundle.get("conflict_case_id") or "")
+        return {"verification": verification, "review_state": self.get_review_state(case_id) if case_id else None}
+
     def issue_conflict_verdict(self, *, principal: str, reviewer: str, verdict: str, memory_ids: tuple[str, ...] | list[str], evidence_bundle_hash: str, evidence_valid: bool, reason: str, as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
         return self.conflict_reviews.issue_verdict(principal=principal, reviewer=reviewer, verdict=verdict, memory_ids=memory_ids, evidence_bundle_hash=evidence_bundle_hash, evidence_valid=evidence_valid, reason=reason, as_of=as_of, known_as_of=known_as_of)
 
