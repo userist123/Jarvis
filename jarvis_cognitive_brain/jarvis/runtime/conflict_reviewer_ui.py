@@ -27,6 +27,7 @@ class ConflictReviewerWindow(tk.Toplevel):
         self.bundle: dict[str, Any] = {}
         self.verification: dict[str, Any] = {}
         self.verdict: dict[str, Any] = {}
+        self.decision_state: dict[str, Any] = {}
         self._build()
 
     def _build(self) -> None:
@@ -57,6 +58,7 @@ class ConflictReviewerWindow(tk.Toplevel):
         self._button(buttons, "Approve B", lambda: self._issue_verdict("ACCEPT_B"), 4)
         self._button(buttons, "Defer", lambda: self._issue_verdict("DEFER"), 5)
         self._button(buttons, "Apply Decision", self._apply_decision, 6)
+        self.apply_button = buttons.winfo_children()[-1]
 
         self.details = ScrolledText(self, wrap="word", state="disabled", font=("Consolas", 10))
         self.details.pack(fill="both", expand=True, padx=8, pady=(0, 8))
@@ -77,26 +79,24 @@ class ConflictReviewerWindow(tk.Toplevel):
             return
         try:
             reasons = tuple(line.strip() for line in self.reasons.get("1.0", "end").splitlines() if line.strip())
-            self.case = self.gateway.open_conflict_review(
-                memory_ids=ids,
-                reasons=reasons,
-                conflict_type=self.conflict_type.get().strip() or "semantic",
-            )
-            self.status.set(f"Opened: {self.case.get('case_id', '-')}")
+            self.case = self.gateway.open_conflict_review(memory_ids=ids, reasons=reasons, conflict_type=self.conflict_type.get().strip() or "semantic")
+            self.decision_state = dict(self.case.get("review_state") or {})
+            self.status.set(f"Opened: {self.case.get('case_id', '-')} / {self.decision_state.get('state', 'OPEN')}")
             self._show(self.case)
+            self._update_controls()
         except Exception as exc:
             self._error(exc)
 
     def _acquire_evidence(self) -> None:
         case_id = str(self.case.get("case_id") or "")
-        ids = self._ids()
         if not case_id:
             messagebox.showerror("Conflict Review", "Open a case first.", parent=self)
             return
         try:
-            self.bundle = self.gateway.acquire_conflict_evidence(memory_ids=ids, conflict_case_id=case_id)
+            self.bundle = self.gateway.acquire_conflict_evidence(memory_ids=self._ids(), conflict_case_id=case_id)
             self.status.set("Evidence acquired")
             self._show(self.bundle)
+            self._update_controls()
         except Exception as exc:
             self._error(exc)
 
@@ -107,12 +107,17 @@ class ConflictReviewerWindow(tk.Toplevel):
         try:
             result = self.gateway.verify_and_advance_conflict_review(bundle=self.bundle)
             self.verification = dict(result.get("verification") or {})
-            self.status.set(f"Evidence valid: {self.verification.get('valid', False)}")
+            self.decision_state = dict(result.get("review_state") or {})
+            self.status.set(f"Evidence valid: {self.verification.get('valid', False)} / state={self.decision_state.get('state', '-')}")
             self._show(result)
+            self._update_controls()
         except Exception as exc:
             self._error(exc)
 
     def _issue_verdict(self, verdict: str) -> None:
+        if not self.identity.can_decide:
+            messagebox.showerror("Conflict Review", "Authenticated HUMAN/ADMIN reviewer identity is required.", parent=self)
+            return
         if not self.verification.get("valid"):
             messagebox.showerror("Conflict Review", "Valid verified evidence is required.", parent=self)
             return
@@ -120,7 +125,6 @@ class ConflictReviewerWindow(tk.Toplevel):
         if not case_id:
             return
         try:
-            review_state = self.gateway.get_review_state(case_id)
             self.verdict = self.reviewer.issue_conflict_verdict(
                 verdict=verdict,
                 memory_ids=self._ids(),
@@ -130,8 +134,11 @@ class ConflictReviewerWindow(tk.Toplevel):
                 as_of=self.bundle.get("as_of"),
                 known_as_of=self.bundle.get("known_as_of"),
             )
-            self.status.set(f"Verdict issued: {verdict}; state={review_state.get('state', '-')}")
-            self._show({"verdict": self.verdict, "review_state": review_state})
+            target_state = "DEFERRED" if verdict == "DEFER" else "APPROVED"
+            self.decision_state = self.reviewer.transition_review_state(case_id=case_id, target=target_state, reason=f"Reviewer issued {verdict}")
+            self.status.set(f"Verdict issued: {verdict} / state={target_state}")
+            self._show({"verdict": self.verdict, "review_state": self.decision_state})
+            self._update_controls()
         except Exception as exc:
             self._error(exc)
 
@@ -139,15 +146,18 @@ class ConflictReviewerWindow(tk.Toplevel):
         if not self.verdict:
             messagebox.showerror("Conflict Review", "Issue a verdict first.", parent=self)
             return
-        case_id = str(self.verdict.get("case_id") or self.bundle.get("conflict_case_id") or self.case.get("case_id") or "")
-        if not case_id:
+        if self.verdict.get("verdict") == "DEFER":
+            self.status.set("Decision deferred; no memory mutation performed")
+            self._show({"verdict": self.verdict, "review_state": self.decision_state, "mutation": "skipped"})
+            return
+        if self.decision_state.get("state") != "APPROVED":
+            messagebox.showerror("Conflict Review", "Review state must be APPROVED before mutation.", parent=self)
             return
         try:
-            state = self.gateway.get_review_state(case_id)
             result = self.reviewer.apply_conflict_verdict(
                 verdict=self.verdict,
                 evidence_verification=self.verification,
-                review_state=state,
+                review_state=self.decision_state,
                 action="attest",
                 reason="Apply authorized conflict decision",
             )
@@ -156,9 +166,13 @@ class ConflictReviewerWindow(tk.Toplevel):
         except Exception as exc:
             self._error(exc)
 
+    def _update_controls(self) -> None:
+        self.apply_button.configure(state="normal" if self.identity.can_decide and self.verdict and self.decision_state.get("state") == "APPROVED" else "disabled")
+
     def _error(self, exc: Exception) -> None:
         self.status.set(f"Error: {exc}")
         self._show({"error": str(exc)})
+        self._update_controls()
 
     def _show(self, payload: dict[str, Any]) -> None:
         self.details.configure(state="normal")
