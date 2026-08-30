@@ -1,7 +1,7 @@
 """JARVIS-side conflict review facade.
 
-Creates review cases from Vault conflict metadata without mutating canonical
-memory. Resolution remains an explicit authorized operation in the Vault.
+Creates review cases and read-only evidence snapshots from the canonical Vault.
+Resolution remains an explicit authorized operation in the Vault.
 """
 
 from __future__ import annotations
@@ -13,6 +13,15 @@ class ConflictReviewService:
     def __init__(self, vault_bridge: Any) -> None:
         self.vault_bridge = vault_bridge
 
+    def _controller(self) -> Any:
+        if not getattr(self.vault_bridge, "available", False):
+            raise RuntimeError("Canonical Vault is unavailable")
+        backend = getattr(self.vault_bridge, "_backend", None)
+        controller = getattr(backend, "controller", None)
+        if controller is None:
+            raise RuntimeError("Canonical MemoryController is unavailable")
+        return controller
+
     def open_case(
         self,
         *,
@@ -23,12 +32,7 @@ class ConflictReviewService:
         as_of: Any = None,
         known_as_of: Any = None,
     ) -> dict[str, Any]:
-        if not getattr(self.vault_bridge, "available", False):
-            raise RuntimeError("Canonical Vault is unavailable")
-        backend = getattr(self.vault_bridge, "_backend", None)
-        controller = getattr(backend, "controller", None)
-        if controller is None:
-            raise RuntimeError("Canonical MemoryController is unavailable")
+        self._controller()
         try:
             from memory_controller.conflict_review import ConflictReviewWorkflow
         except Exception as exc:
@@ -42,3 +46,44 @@ class ConflictReviewService:
             as_of=as_of,
             known_as_of=known_as_of,
         ).as_dict()
+
+    def acquire_evidence(
+        self,
+        *,
+        memory_ids: Iterable[str],
+        conflict_case_id: str | None = None,
+        as_of: Any = None,
+        known_as_of: Any = None,
+    ) -> dict[str, Any]:
+        """Build a hash-verifiable, read-only evidence snapshot from canonical reads."""
+        controller = self._controller()
+        try:
+            from memory_controller.evidence_bundle import build_evidence_bundle
+        except Exception as exc:
+            raise RuntimeError("Canonical evidence bundle builder is unavailable") from exc
+
+        ids = tuple(dict.fromkeys(str(x) for x in memory_ids if x))
+        if len(ids) < 2:
+            raise ValueError("At least two memory IDs are required")
+
+        notes: list[dict[str, Any]] = []
+        for note_id in ids:
+            try:
+                pack = controller.cognitive_read(
+                    getattr(self.vault_bridge._backend, "principal"),
+                    note_id,
+                )
+            except Exception as exc:
+                raise RuntimeError(f"Unable to acquire evidence for memory {note_id}") from exc
+            results = list(pack.get("results", pack.get("items", [])))
+            if not results:
+                raise ValueError(f"Memory {note_id} was not readable for evidence acquisition")
+            notes.append(dict(results[0]))
+
+        return build_evidence_bundle(
+            notes,
+            conflict_case_id=conflict_case_id,
+            evidence_ids=ids,
+            as_of=as_of,
+            known_as_of=known_as_of,
+        )
