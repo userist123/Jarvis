@@ -180,7 +180,8 @@ class JarvisApp(tk.Tk):
             self._reviewer_window.lift()
             self._reviewer_window.focus_force()
             return
-        self._reviewer_window = open_reviewer_window(self, self.chat.gateway)
+        identity = self.chat.gateway.current_reviewer_identity()
+        self._reviewer_window = open_reviewer_window(self, self.chat.gateway, identity=identity)
         self._reviewer_window.protocol("WM_DELETE_WINDOW", self._close_reviewer)
 
     def _close_reviewer(self) -> None:
