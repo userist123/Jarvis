@@ -8,14 +8,20 @@ from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Any, Callable
 
-from .reviewer_actions import derive_reviewer_actions
 from .reviewer_identity import ReviewerIdentity
 
 
 class ReviewerWindow(tk.Toplevel):
-    """Policy-aware review UI; authoritative gates remain in JARVIS/Vault."""
+    """Policy-aware learning review UI; authoritative gates remain in JARVIS/Vault."""
 
-    def __init__(self, parent: tk.Misc, gateway: Any, *, identity: ReviewerIdentity | None = None, action_handler: Callable[[str, str, dict[str, Any]], None] | None = None):
+    def __init__(
+        self,
+        parent: tk.Misc,
+        gateway: Any,
+        *,
+        identity: ReviewerIdentity | None = None,
+        action_handler: Callable[[str, str, dict[str, Any]], None] | None = None,
+    ):
         super().__init__(parent)
         self.gateway = gateway
         self.identity = identity or ReviewerIdentity.unauthenticated()
@@ -33,7 +39,7 @@ class ReviewerWindow(tk.Toplevel):
         toolbar = ttk.Frame(self, padding=8)
         toolbar.pack(fill="x")
         ttk.Label(toolbar, text="Memory Review", font=("Segoe UI", 16, "bold")).pack(side="left")
-        ttk.Label(toolbar, textvariable=tk.StringVar(value=f"Identity: {self.identity.subject or 'none'} / {self.identity.principal.value}")).pack(side="left", padx=16)
+        ttk.Label(toolbar, text=f"Identity: {self.identity.subject or 'none'} / {self.identity.principal.value}").pack(side="left", padx=16)
         ttk.Button(toolbar, text="Refresh", command=self.refresh).pack(side="right")
 
         body = ttk.Panedwindow(self, orient="horizontal")
@@ -110,27 +116,26 @@ class ReviewerWindow(tk.Toplevel):
         if not self._selected_dossier or self._selected_dossier.get("error"):
             return
 
-        review_state = self._selected_dossier.get("review_state") or {"state": "DECISION_PENDING" if self._selected_dossier.get("case") else ""}
-        confidence = self._selected_dossier.get("confidence_snapshot", {}).get("confidence") or {}
-        actions = derive_reviewer_actions(
-            review_state=review_state,
-            evidence_verification=self._selected_dossier.get("evidence_verification"),
-            principal=self.identity.principal.value,
-            confidence=confidence,
-        )
-        if actions.inspect:
-            self._buttons["OPEN_REVIEW"].configure(state="normal")
         proposed = set(self._selected_dossier.get("proposed_actions") or [])
+        if "OPEN_REVIEW" in self._buttons:
+            self._buttons["OPEN_REVIEW"].configure(state="normal")
+        if not self.identity.can_decide or self.action_handler is None:
+            return
         for action in proposed:
             button = self._buttons.get(action)
-            if button is not None and self.action_handler is not None:
+            if button is not None:
                 button.configure(state="normal")
-        self.state.set(f"{self.state.get()} | {self.identity.principal.value} | {'authenticated' if self.identity.authenticated else 'unauthenticated'}")
+        self.state.set(
+            f"{self.state.get()} | {self.identity.principal.value} | "
+            f"{'authenticated' if self.identity.authenticated else 'unauthenticated'}"
+        )
 
     def _request_action(self, action: str) -> None:
+        if not self.identity.can_decide or self.action_handler is None:
+            return
         case = self._selected_dossier.get("case") or {}
         case_id = str(case.get("case_id") or "")
-        if not case_id or self.action_handler is None:
+        if not case_id:
             return
         self.action_handler(action, case_id, self._selected_dossier)
 
@@ -141,6 +146,12 @@ class ReviewerWindow(tk.Toplevel):
         self.details.configure(state="disabled")
 
 
-def open_reviewer_window(parent: tk.Misc, gateway: Any, *, identity: ReviewerIdentity | None = None, action_handler: Callable[[str, str, dict[str, Any]], None] | None = None) -> ReviewerWindow:
+def open_reviewer_window(
+    parent: tk.Misc,
+    gateway: Any,
+    *,
+    identity: ReviewerIdentity | None = None,
+    action_handler: Callable[[str, str, dict[str, Any]], None] | None = None,
+) -> ReviewerWindow:
     """Open reviewer UI with explicit identity context."""
     return ReviewerWindow(parent, gateway, identity=identity, action_handler=action_handler)
