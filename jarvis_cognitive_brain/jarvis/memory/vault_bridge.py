@@ -55,6 +55,8 @@ class NativeMemoryControllerBackend:
         known_as_of: Any = None,
     ) -> list[dict[str, Any]]:
         if self._temporal_controller is None:
+            if as_of is not None or known_as_of is not None:
+                raise RuntimeError("Temporal Vault controller is unavailable")
             return self.search_memory(query, limit=limit)
         pack = self._temporal_controller.search(
             self.principal,
