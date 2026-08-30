@@ -6,55 +6,34 @@ import getpass
 import os
 import platform
 from dataclasses import dataclass
-from typing import Mapping
 
-from .reviewer_identity import ReviewerIdentity
+from .reviewer_identity import ReviewerIdentity, ReviewerPrincipal
 
 
 @dataclass(frozen=True)
 class WindowsIdentityProvider:
-    """Resolve the local Windows session identity without assigning admin role."""
+    """Resolve the local Windows session identity without assigning admin role automatically."""
 
     admin_subjects: frozenset[str] = frozenset()
 
     def resolve(self) -> ReviewerIdentity:
-        system = platform.system()
-        if system != "Windows":
-            return ReviewerIdentity(
-                subject="",
-                principal="UNAUTHENTICATED",
-                authenticated=False,
-                can_decide=False,
-            )
-
+        if platform.system() != "Windows":
+            return ReviewerIdentity.unauthenticated()
         subject = self._subject()
         if not subject:
-            return ReviewerIdentity(
-                subject="",
-                principal="UNAUTHENTICATED",
-                authenticated=False,
-                can_decide=False,
-            )
-
-        principal = "ADMIN" if subject in self.admin_subjects else "HUMAN"
-        return ReviewerIdentity(
-            subject=subject,
-            principal=principal,
-            authenticated=True,
-            can_decide=True,
-        )
+            return ReviewerIdentity.unauthenticated()
+        principal = ReviewerPrincipal.ADMIN if subject in self.admin_subjects else ReviewerPrincipal.HUMAN
+        return ReviewerIdentity(subject=subject, principal=principal, authenticated=True)
 
     @staticmethod
     def _subject() -> str:
-        for value in (
-            os.environ.get("USERDOMAIN\\\\USERNAME"),
-            os.environ.get("USERDOMAIN") and os.environ.get("USERNAME") and f"{os.environ['USERDOMAIN']}\\{os.environ['USERNAME']}",
-            os.environ.get("USERNAME"),
-        ):
-            if value:
-                return value.strip()
+        domain = os.environ.get("USERDOMAIN", "").strip()
+        username = os.environ.get("USERNAME", "").strip()
+        if domain and username:
+            return f"{domain}\\{username}"
+        if username:
+            return username
         try:
-            value = getpass.getuser()
+            return str(getpass.getuser()).strip()
         except Exception:
             return ""
-        return str(value).strip()
