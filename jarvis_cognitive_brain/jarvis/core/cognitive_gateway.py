@@ -76,6 +76,12 @@ class CognitiveGateway:
     def open_conflict_review(self, *, memory_ids: tuple[str, ...] | list[str], reasons: tuple[str, ...] | list[str], conflict_type: str = "semantic", evidence_ids: tuple[str, ...] | list[str] = (), as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
         return self.conflict_reviews.open_case(memory_ids=memory_ids, reasons=reasons, conflict_type=conflict_type, evidence_ids=evidence_ids, as_of=as_of, known_as_of=known_as_of)
 
+    def transition_review_state(self, *, case_id: str, target: str, actor: str, reason: str) -> dict[str, Any]:
+        return self.conflict_reviews.transition_review(case_id=case_id, target=target, actor=actor, reason=reason)
+
+    def get_review_state(self, case_id: str) -> dict[str, Any]:
+        return self.conflict_reviews.review_state(case_id)
+
     def acquire_conflict_evidence(self, *, memory_ids: tuple[str, ...] | list[str], conflict_case_id: str | None = None, as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
         return self.conflict_reviews.acquire_evidence(memory_ids=memory_ids, conflict_case_id=conflict_case_id, as_of=as_of, known_as_of=known_as_of)
 
@@ -86,7 +92,7 @@ class CognitiveGateway:
         return self.conflict_reviews.issue_verdict(principal=principal, reviewer=reviewer, verdict=verdict, memory_ids=memory_ids, evidence_bundle_hash=evidence_bundle_hash, evidence_valid=evidence_valid, reason=reason, as_of=as_of, known_as_of=known_as_of)
 
     def apply_conflict_verdict(self, *, principal: str, verdict: dict[str, Any], evidence_verification: dict[str, Any], review_state: dict[str, Any], action: str, reason: str) -> dict[str, Any]:
-        """Apply a verdict only when its review case is APPROVED."""
+        """Apply a verdict only when its review case is APPROVED or correctly DEFERRED."""
         return self.conflict_reviews.apply_verdict(principal=principal, verdict=verdict, evidence_verification=evidence_verification, review_state=review_state, action=action, reason=reason)
 
     def promote_learning_candidate(self, *, principal: str, reviewer: str, memory_id: str, evidence_verification: dict[str, Any], evidence_bundle_hash: str, confidence: dict[str, Any], confidence_snapshot: dict[str, Any]) -> dict[str, Any]:
