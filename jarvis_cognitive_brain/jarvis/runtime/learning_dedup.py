@@ -27,6 +27,7 @@ class LearningCase:
     evidence_ids: set[str] = field(default_factory=set)
     execution_ids: set[str] = field(default_factory=set)
     statuses: set[str] = field(default_factory=set)
+    outcome_counts: dict[str, int] = field(default_factory=dict)
 
     def add(self, observation: Mapping[str, Any]) -> None:
         self.occurrences += 1
@@ -36,7 +37,9 @@ class LearningCase:
             self.execution_ids.add(str(execution_id))
         status = observation.get("status")
         if status:
-            self.statuses.add(str(status))
+            normalized = str(status)
+            self.statuses.add(normalized)
+            self.outcome_counts[normalized] = self.outcome_counts.get(normalized, 0) + 1
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -49,6 +52,7 @@ class LearningCase:
             "evidence_ids": sorted(self.evidence_ids),
             "execution_ids": sorted(self.execution_ids),
             "statuses": sorted(self.statuses),
+            "outcome_counts": dict(sorted(self.outcome_counts.items())),
         }
 
 
@@ -87,7 +91,7 @@ class LearningDeduplicator:
         case.add(observation)
         if risk == "high" or case.risk == "high":
             case.risk = "high"
-        elif risk == "medium":
+        elif risk == "medium" and case.risk == "low":
             case.risk = "medium"
         return case
 
