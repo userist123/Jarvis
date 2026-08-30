@@ -10,6 +10,7 @@ from jarvis.config import Settings, get_settings
 from jarvis.runtime.bootstrap import diagnose
 from jarvis.runtime.chat import ChatRuntime
 from jarvis.runtime.conflict_reviewer_ui import open_conflict_reviewer_window
+from jarvis.runtime.governance_ui import open_governance_center
 from jarvis.runtime.reviewer_ui import open_reviewer_window
 
 
@@ -25,6 +26,7 @@ class JarvisApp(tk.Tk):
         self.configure(padx=12, pady=12)
         self._reviewer_window: tk.Toplevel | None = None
         self._conflict_reviewer_window: tk.Toplevel | None = None
+        self._governance_window: tk.Toplevel | None = None
 
         self.chat = ChatRuntime(self.settings)
         self.status = tk.StringVar(value="Starting...")
@@ -93,7 +95,8 @@ class JarvisApp(tk.Tk):
         self._info_row(right, "Session", self.session)
 
         ttk.Separator(right).pack(fill="x", pady=12)
-        ttk.Button(right, text="Open Memory Review", command=self._open_reviewer).pack(fill="x")
+        ttk.Button(right, text="Open Governance Center", command=self._open_governance).pack(fill="x")
+        ttk.Button(right, text="Open Memory Review", command=self._open_reviewer).pack(fill="x", pady=(6, 0))
         ttk.Button(right, text="Open Conflict Review", command=self._open_conflict_reviewer).pack(fill="x", pady=(6, 0))
         ttk.Button(right, text="New session", command=self._reset).pack(fill="x", pady=(6, 0))
         ttk.Button(right, text="Refresh status", command=self._refresh_status).pack(fill="x", pady=(6, 0))
@@ -177,6 +180,19 @@ class JarvisApp(tk.Tk):
             self.plan_state.set(str(metadata.get("council") or "single-agent"))
         self.send.configure(state="normal")
         self.status.set("Ready")
+
+    def _open_governance(self) -> None:
+        if self._governance_window is not None and self._governance_window.winfo_exists():
+            self._governance_window.lift()
+            self._governance_window.focus_force()
+            return
+        self._governance_window = open_governance_center(self, self.chat.gateway)
+        self._governance_window.protocol("WM_DELETE_WINDOW", self._close_governance)
+
+    def _close_governance(self) -> None:
+        if self._governance_window is not None:
+            self._governance_window.destroy()
+        self._governance_window = None
 
     def _open_reviewer(self) -> None:
         if self._reviewer_window is not None and self._reviewer_window.winfo_exists():
