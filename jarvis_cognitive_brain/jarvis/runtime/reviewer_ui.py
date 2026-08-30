@@ -1,4 +1,4 @@
-"""Tkinter reviewer window backed by read-only JARVIS review contracts."""
+"""Tkinter reviewer window backed by JARVIS review contracts."""
 
 from __future__ import annotations
 
@@ -8,13 +8,17 @@ from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Any, Callable
 
+from .reviewer_actions import derive_reviewer_actions
+from .reviewer_identity import ReviewerIdentity
+
 
 class ReviewerWindow(tk.Toplevel):
-    """Read-only review UI with policy-derived, non-authoritative action affordances."""
+    """Policy-aware review UI; authoritative gates remain in JARVIS/Vault."""
 
-    def __init__(self, parent: tk.Misc, gateway: Any, *, action_handler: Callable[[str, str, dict[str, Any]], None] | None = None):
+    def __init__(self, parent: tk.Misc, gateway: Any, *, identity: ReviewerIdentity | None = None, action_handler: Callable[[str, str, dict[str, Any]], None] | None = None):
         super().__init__(parent)
         self.gateway = gateway
+        self.identity = identity or ReviewerIdentity.unauthenticated()
         self.action_handler = action_handler
         self.title("JARVIS - Memory Review")
         self.geometry("1080x720")
@@ -29,6 +33,7 @@ class ReviewerWindow(tk.Toplevel):
         toolbar = ttk.Frame(self, padding=8)
         toolbar.pack(fill="x")
         ttk.Label(toolbar, text="Memory Review", font=("Segoe UI", 16, "bold")).pack(side="left")
+        ttk.Label(toolbar, textvariable=tk.StringVar(value=f"Identity: {self.identity.subject or 'none'} / {self.identity.principal.value}")).pack(side="left", padx=16)
         ttk.Button(toolbar, text="Refresh", command=self.refresh).pack(side="right")
 
         body = ttk.Panedwindow(self, orient="horizontal")
@@ -80,18 +85,7 @@ class ReviewerWindow(tk.Toplevel):
         for item in self.tree.get_children():
             self.tree.delete(item)
         for item in self._queue:
-            self.tree.insert(
-                "",
-                "end",
-                iid=str(item.get("case_id")),
-                values=(
-                    item.get("case_id", ""),
-                    item.get("risk", ""),
-                    item.get("confidence_score", ""),
-                    item.get("priority", ""),
-                    "YES" if item.get("promotable") else "NO",
-                ),
-            )
+            self.tree.insert("", "end", iid=str(item.get("case_id")), values=(item.get("case_id", ""), item.get("risk", ""), item.get("confidence_score", ""), item.get("priority", ""), "YES" if item.get("promotable") else "NO"))
         self._selected_dossier = {}
         self.state.set(f"{len(self._queue)} review cases")
         self._update_actions()
@@ -116,13 +110,22 @@ class ReviewerWindow(tk.Toplevel):
         if not self._selected_dossier or self._selected_dossier.get("error"):
             return
 
-        proposed = set(self._selected_dossier.get("proposed_actions") or [])
-        if "OPEN_REVIEW" in self._buttons:
+        review_state = self._selected_dossier.get("review_state") or {"state": "DECISION_PENDING" if self._selected_dossier.get("case") else ""}
+        confidence = self._selected_dossier.get("confidence_snapshot", {}).get("confidence") or {}
+        actions = derive_reviewer_actions(
+            review_state=review_state,
+            evidence_verification=self._selected_dossier.get("evidence_verification"),
+            principal=self.identity.principal.value,
+            confidence=confidence,
+        )
+        if actions.inspect:
             self._buttons["OPEN_REVIEW"].configure(state="normal")
+        proposed = set(self._selected_dossier.get("proposed_actions") or [])
         for action in proposed:
             button = self._buttons.get(action)
-            if button is not None:
-                button.configure(state="normal" if self.action_handler is not None else "disabled")
+            if button is not None and self.action_handler is not None:
+                button.configure(state="normal")
+        self.state.set(f"{self.state.get()} | {self.identity.principal.value} | {'authenticated' if self.identity.authenticated else 'unauthenticated'}")
 
     def _request_action(self, action: str) -> None:
         case = self._selected_dossier.get("case") or {}
@@ -138,11 +141,6 @@ class ReviewerWindow(tk.Toplevel):
         self.details.configure(state="disabled")
 
 
-def open_reviewer_window(
-    parent: tk.Misc,
-    gateway: Any,
-    *,
-    action_handler: Callable[[str, str, dict[str, Any]], None] | None = None,
-) -> ReviewerWindow:
-    """Open the reviewer window; callers may inject an authenticated action handler."""
-    return ReviewerWindow(parent, gateway, action_handler=action_handler)
+def open_reviewer_window(parent: tk.Misc, gateway: Any, *, identity: ReviewerIdentity | None = None, action_handler: Callable[[str, str, dict[str, Any]], None] | None = None) -> ReviewerWindow:
+    """Open reviewer UI with explicit identity context."""
+    return ReviewerWindow(parent, gateway, identity=identity, action_handler=action_handler)
