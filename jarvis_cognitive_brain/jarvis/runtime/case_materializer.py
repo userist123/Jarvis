@@ -60,10 +60,7 @@ class CaseMaterializer:
                 if not canonical_case_id:
                     raise RuntimeError("Canonical conflict case did not return case_id")
                 provisional = self.case_store.create_from_signal(signal)
-                provisional["canonical_case_id"] = canonical_case_id
-                provisional["status"] = "OPEN"
-                provisional["metadata"]["materialization"] = "canonical_conflict_review"
-                self._save_record(signal_id, provisional)
+                self.case_store.attach_canonical_case(signal_id, canonical_case_id, status="OPEN")
             return MaterializationResult(
                 signal_id=signal_id,
                 kind="conflict",
@@ -89,7 +86,3 @@ class CaseMaterializer:
             memory_ids=memory_ids,
             metadata={"materialization": "provisional_work_item"},
         )
-
-    def _save_record(self, signal_id: str, record: dict[str, Any]) -> None:
-        self.case_store._records[signal_id] = dict(record)
-        self.case_store._rewrite()
