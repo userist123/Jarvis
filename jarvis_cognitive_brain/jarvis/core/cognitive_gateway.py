@@ -117,6 +117,22 @@ class CognitiveGateway:
             known_as_of=known_as_of,
         )
 
+    def acquire_conflict_evidence(
+        self,
+        *,
+        memory_ids: tuple[str, ...] | list[str],
+        conflict_case_id: str | None = None,
+        as_of: date | str | None = None,
+        known_as_of: date | str | None = None,
+    ) -> dict[str, Any]:
+        """Acquire a read-only, hash-verifiable evidence bundle."""
+        return self.conflict_reviews.acquire_evidence(
+            memory_ids=memory_ids,
+            conflict_case_id=conflict_case_id,
+            as_of=as_of,
+            known_as_of=known_as_of,
+        )
+
     def process_intent(self, intent_text: str) -> dict[str, Any]:
         return self.executive.process_as_ai_agent(intent_text)
 
