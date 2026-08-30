@@ -1,10 +1,4 @@
-"""Guarded bridge between JARVIS and the canonical AI Memory Vault runtime.
-
-The native adapter is optional and discovered only when the configured Vault
-contains the real ``memory_controller`` package. JARVIS never touches the
-Vault storage engine directly; reads/writes go through MemoryController so
-its authorization, validation and audit rules remain in force.
-"""
+"""Guarded bridge between JARVIS and the canonical AI Memory Vault runtime."""
 
 from __future__ import annotations
 
@@ -17,9 +11,7 @@ from typing import Any, Optional, Protocol
 
 class VaultBackend(Protocol):
     def search_memory(self, query: str, limit: int = 20) -> list[dict[str, Any]]: ...
-
     def related_memory(self, note_id: str, limit: int = 20) -> list[dict[str, Any]]: ...
-
     def propose_memory(self, note: dict[str, Any]) -> Any: ...
 
 
@@ -37,36 +29,20 @@ class NativeMemoryControllerBackend:
     def __init__(self, vault_root: Path) -> None:
         if str(vault_root) not in sys.path:
             sys.path.insert(0, str(vault_root))
-
         controller_module = importlib.import_module("memory_controller.controller")
         authorizer_module = importlib.import_module("memory_controller.authorizer")
         storage_module = importlib.import_module("memory_controller.storage.file_engine")
-
         storage = storage_module.FileStorageEngine(str(vault_root))
         self.controller = controller_module.MemoryController(storage)
         self.principal = authorizer_module.Principal.AI_AGENT
 
     def search_memory(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
-        # Controller.search provides the native authorization, lifecycle,
-        # sanitization, budget, ranking and audit boundary.
-        pack = self.controller.search(
-            self.principal,
-            query,
-            page_size=max(1, min(limit, 100)),
-        )
+        pack = self.controller.search(self.principal, query, page_size=max(1, min(limit, 100)))
         return list(pack.get("results", pack.get("items", [])))
 
     def related_memory(self, note_id: str, limit: int = 20) -> list[dict[str, Any]]:
-        """Return authorized canonical data for a note.
-
-        ``cognitive_read`` returns a context pack for the requested note; it is
-        not a graph-neighbor query. Keep the contract honest and let the caller
-        decide whether to follow explicit relation IDs via another authorized
-        read path.
-        """
         pack = self.controller.cognitive_read(self.principal, note_id)
-        results = list(pack.get("results", pack.get("items", [])))
-        return results[: max(1, min(limit, 100))]
+        return list(pack.get("results", pack.get("items", [])))[:max(1, min(limit, 100))]
 
     def propose_memory(self, note: dict[str, Any]) -> Any:
         return self.controller.propose(self.principal, dict(note))
@@ -75,13 +51,7 @@ class NativeMemoryControllerBackend:
 class VaultBridge:
     """Fail-closed bridge for optional native Vault integration."""
 
-    def __init__(
-        self,
-        vault_root: str | Path,
-        backend: Optional[VaultBackend] = None,
-        *,
-        enable_native: bool = True,
-    ) -> None:
+    def __init__(self, vault_root: str | Path, backend: Optional[VaultBackend] = None, *, enable_native: bool = True) -> None:
         self.root = Path(vault_root).expanduser().resolve()
         self._backend = backend
         self._status_reason = "injected backend"
@@ -117,6 +87,17 @@ class VaultBridge:
         if not self._backend:
             return []
         return list(self._backend.search_memory(query, limit=limit))
+
+    def search_memory_temporal(self, query: str, limit: int = 20, *, temporal_filter=None) -> list[dict[str, Any]]:
+        """Search through the native controller, then optionally apply an as_of filter.
+
+        The native Vault currently does not expose an as_of query parameter, so
+        temporal filtering is intentionally a second-stage JARVIS concern.
+        """
+        results = self.search_memory(query, limit=limit)
+        if temporal_filter is None:
+            return results
+        return list(temporal_filter(results))
 
     def related_memory(self, note_id: str, limit: int = 20) -> list[dict[str, Any]]:
         if not self._backend:
