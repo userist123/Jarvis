@@ -8,6 +8,8 @@ from typing import Any, Mapping
 import hashlib
 import json
 
+from jarvis.runtime.learning_eligibility import assess_learning_eligibility
+
 
 @dataclass(frozen=True)
 class ExecutionObservation:
@@ -18,6 +20,8 @@ class ExecutionObservation:
     error: str | None = None
     evidence_ids: tuple[str, ...] = ()
     observed_at: str = ""
+    learning_eligible: bool = False
+    learning_risk: str = "low"
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -29,6 +33,8 @@ class ExecutionObservation:
             "error": self.error,
             "evidence_ids": list(self.evidence_ids),
             "observed_at": self.observed_at,
+            "learning_eligible": self.learning_eligible,
+            "learning_risk": self.learning_risk,
         }
 
 
@@ -41,6 +47,12 @@ def observation_from_turn(intent: str, result: Mapping[str, Any]) -> ExecutionOb
     evidence = result.get("evidence_ids") or result.get("evidence") or ()
     if isinstance(evidence, (str, bytes)):
         evidence = (str(evidence),)
+    observation = {
+        "status": status,
+        "evidence_ids": tuple(str(x) for x in evidence),
+        "risky_capability": bool(result.get("risky_capability")),
+    }
+    eligibility = assess_learning_eligibility(observation)
     return ExecutionObservation(
         execution_id=execution_id,
         intent=intent,
@@ -49,4 +61,6 @@ def observation_from_turn(intent: str, result: Mapping[str, Any]) -> ExecutionOb
         error=str(result.get("error")) if result.get("error") is not None else None,
         evidence_ids=tuple(str(x) for x in evidence),
         observed_at=datetime.now(timezone.utc).isoformat(),
+        learning_eligible=eligibility.eligible,
+        learning_risk=eligibility.risk,
     )
