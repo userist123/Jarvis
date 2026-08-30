@@ -70,8 +70,21 @@ class CognitiveGateway:
         return self.conflict_reviews.acquire_evidence(memory_ids=memory_ids, conflict_case_id=conflict_case_id, as_of=as_of, known_as_of=known_as_of)
 
     def verify_conflict_evidence(self, *, bundle: dict[str, Any]) -> dict[str, Any]:
-        """Re-read canonical memories and verify evidence integrity without mutation."""
         return self.conflict_reviews.verify_evidence(bundle=bundle)
+
+    def issue_conflict_verdict(self, *, principal: str, reviewer: str, verdict: str, memory_ids: tuple[str, ...] | list[str], evidence_bundle_hash: str, evidence_valid: bool, reason: str, as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
+        """Issue an authorized review verdict; no memory mutation is performed."""
+        return self.conflict_reviews.issue_verdict(
+            principal=principal,
+            reviewer=reviewer,
+            verdict=verdict,
+            memory_ids=memory_ids,
+            evidence_bundle_hash=evidence_bundle_hash,
+            evidence_valid=evidence_valid,
+            reason=reason,
+            as_of=as_of,
+            known_as_of=known_as_of,
+        )
 
     def process_intent(self, intent_text: str) -> dict[str, Any]:
         return self.executive.process_as_ai_agent(intent_text)
