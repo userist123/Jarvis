@@ -74,14 +74,10 @@ class CognitiveGateway:
         return self.conflict_reviews.issue_verdict(principal=principal, reviewer=reviewer, verdict=verdict, memory_ids=memory_ids, evidence_bundle_hash=evidence_bundle_hash, evidence_valid=evidence_valid, reason=reason, as_of=as_of, known_as_of=known_as_of)
 
     def apply_conflict_verdict(self, *, principal: str, verdict: dict[str, Any], evidence_verification: dict[str, Any], action: str, reason: str) -> dict[str, Any]:
-        """Apply a verified verdict through the canonical mutation gate."""
-        return self.conflict_reviews.apply_verdict(
-            principal=principal,
-            verdict=verdict,
-            evidence_verification=evidence_verification,
-            action=action,
-            reason=reason,
-        )
+        return self.conflict_reviews.apply_verdict(principal=principal, verdict=verdict, evidence_verification=evidence_verification, action=action, reason=reason)
+
+    def promote_learning_candidate(self, *, principal: str, reviewer: str, memory_id: str, evidence_verification: dict[str, Any], evidence_bundle_hash: str) -> dict[str, Any]:
+        return self.conflict_reviews.promote_learning_candidate(principal=principal, reviewer=reviewer, memory_id=memory_id, evidence_verification=evidence_verification, evidence_bundle_hash=evidence_bundle_hash)
 
     def process_intent(self, intent_text: str) -> dict[str, Any]:
         return self.executive.process_as_ai_agent(intent_text)
