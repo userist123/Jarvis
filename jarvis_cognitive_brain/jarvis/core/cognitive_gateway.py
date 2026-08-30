@@ -9,15 +9,13 @@ from jarvis.llm.model_router import ModelRouter
 from jarvis.memory.vault_context import VaultContextLoader
 from jarvis.memory.vault_bridge import VaultBridge
 from jarvis.runtime.temporal import TemporalQuery, filter_temporal
+from jarvis.runtime.learning_review_filters import build_filtered_queue
 from jarvis.core.executive_adapter import ExecutiveAdapter
 from jarvis.core.cognitive_session import CognitiveSession
 from jarvis.core.session_manager import SessionManager, SessionResumeResult
 from jarvis.core.learning_loop import LearningLoop
 from jarvis.core.reflection_engine import ReflectionResult
 from jarvis.runtime.conflict_review import ConflictReviewService
-from jarvis.runtime.learning_review_queue import LearningReviewQueue
-from jarvis.runtime.learning_store import PersistentLearningStore
-from jarvis.runtime.learning_dedup import LearningCase
 from jarvis.agents.agent_council import AgentCouncil, CouncilPlan
 from jarvis.agents.agent_registry import AgentRegistry
 from jarvis.agents.agent_router import AgentRoute, AgentRouter
@@ -34,8 +32,7 @@ class CognitiveGateway:
         self.executive = ExecutiveAdapter(self.settings.vault_path)
         self.sessions = SessionManager(self.settings)
         self.learning = LearningLoop(self.vault_bridge)
-        self.learning_store = PersistentLearningStore(".jarvis/learning_cases.json")
-        self.learning_review_queue = LearningReviewQueue()
+        self.learning_store = self.learning.store
         self.conflict_reviews = ConflictReviewService(self.vault_bridge)
         self.agent_registry = AgentRegistry(self.settings.vault_path)
         self.agent_router: AgentRouter = self.agent_registry.build_router()
@@ -65,6 +62,26 @@ class CognitiveGateway:
         results = list(pack.get("results", pack.get("items", [])))
         filtered = list(filter_temporal(results, temporal))
         return {"results": filtered, "temporal": pack.get("temporal"), "conflicts": list((pack.get("temporal") or {}).get("conflicts", []))}
+
+    def learning_review_queue(
+        self,
+        *,
+        risk: str | None = None,
+        promotable: bool | None = None,
+        min_confidence: float | None = None,
+        as_of: date | str | None = None,
+        known_as_of: date | str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return a read-only, optionally temporal review queue."""
+        items = build_filtered_queue(
+            self.learning_store.records(),
+            risk=risk,
+            promotable=promotable,
+            min_confidence=min_confidence,
+            as_of=as_of,
+            known_as_of=known_as_of,
+        )
+        return [item.as_dict() for item in items]
 
     def open_conflict_review(self, *, memory_ids: tuple[str, ...] | list[str], reasons: tuple[str, ...] | list[str], conflict_type: str = "semantic", evidence_ids: tuple[str, ...] | list[str] = (), as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
         return self.conflict_reviews.open_case(memory_ids=memory_ids, reasons=reasons, conflict_type=conflict_type, evidence_ids=evidence_ids, as_of=as_of, known_as_of=known_as_of)
@@ -102,16 +119,6 @@ class CognitiveGateway:
             confidence=confidence,
             confidence_snapshot=confidence_snapshot,
         )
-
-    def learning_review_queue(self) -> list[dict[str, Any]]:
-        """Return a deterministic, read-only review queue from persistent learning cases."""
-        objects: list[LearningCase] = []
-        for record in self.learning_store.records():
-            try:
-                objects.append(LearningCase(**record))
-            except TypeError:
-                continue
-        return [item.as_dict() for item in self.learning_review_queue.build(objects)]
 
     def process_intent(self, intent_text: str) -> dict[str, Any]:
         return self.executive.process_as_ai_agent(intent_text)
