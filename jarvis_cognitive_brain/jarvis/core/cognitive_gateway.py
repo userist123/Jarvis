@@ -13,6 +13,7 @@ from jarvis.runtime.learning_review_filters import build_filtered_queue
 from jarvis.runtime.learning_review_session import LearningReviewSessionService
 from jarvis.runtime.learning_review_dashboard import ReviewerDashboardService
 from jarvis.runtime.governance_center import GovernanceCenterService
+from jarvis.runtime.case_materialization_service import CaseMaterializationService
 from jarvis.runtime.review_lifecycle import ReviewLifecycleService
 from jarvis.runtime.windows_identity import WindowsIdentityProvider
 from jarvis.runtime.reviewer_identity import ReviewerIdentity
@@ -44,6 +45,9 @@ class CognitiveGateway:
         self.review_lifecycle = ReviewLifecycleService()
         self.conflict_reviews = ConflictReviewService(self.vault_bridge)
         self.governance_center_service = GovernanceCenterService(self.learning_store, self.conflict_reviews.review_states)
+        self.case_materialization_service = CaseMaterializationService(
+            conflict_service=self.conflict_reviews,
+        )
         self.reviewer_identity = WindowsIdentityProvider(
             admin_subjects=frozenset(str(x).strip() for x in self.settings.reviewer_admin_subjects if str(x).strip())
         ).resolve()
@@ -57,6 +61,15 @@ class CognitiveGateway:
 
     def governance_center(self, *, risk: str | None = None, min_confidence: float | None = None, top_n: int = 10) -> dict[str, Any]:
         return self.governance_center_service.build(identity=self.reviewer_identity.as_dict(), risk=risk, min_confidence=min_confidence, top_n=top_n).as_dict()
+
+    def memory_case(self, signal: Mapping[str, Any]) -> dict[str, Any]:
+        return self.case_materialization_service.materialize_signal(signal)
+
+    def memory_cases(self) -> list[dict[str, Any]]:
+        return self.case_materialization_service.list_cases()
+
+    def memory_cases_from_signals(self, signals: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+        return self.case_materialization_service.materialize_many(signals)
 
     def provider(self, capability: str = "reasoning") -> BaseLLMProvider:
         return self._provider_override or self.router.provider(capability)
