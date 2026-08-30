@@ -87,3 +87,30 @@ class ConflictReviewService:
             as_of=as_of,
             known_as_of=known_as_of,
         )
+
+    def verify_evidence(
+        self,
+        *,
+        bundle: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Re-read canonical memories and verify bundle integrity without mutation."""
+        controller = self._controller()
+        try:
+            from memory_controller.evidence_verifier import verify_evidence_bundle
+        except Exception as exc:
+            raise RuntimeError("Canonical evidence verifier is unavailable") from exc
+
+        principal = getattr(self.vault_bridge._backend, "principal")
+        notes: list[dict[str, Any]] = []
+        for item in bundle.get("items", []):
+            note_id = str(item.get("memory_id") or "")
+            if not note_id:
+                continue
+            try:
+                pack = controller.cognitive_read(principal, note_id)
+            except Exception:
+                continue
+            results = list(pack.get("results", pack.get("items", [])))
+            if results:
+                notes.append(dict(results[0]))
+        return verify_evidence_bundle(bundle, notes).as_dict()
