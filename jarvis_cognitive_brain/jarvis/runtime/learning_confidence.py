@@ -34,18 +34,32 @@ class LearningConfidence:
 
 def assess_learning_confidence(case: LearningCase) -> LearningConfidence:
     frequency = min(case.occurrences / 5.0, 1.0)
-    successes = sum(1 for status in case.statuses if status == "success")
-    errors = sum(1 for status in case.statuses if status == "error")
-    blocked = sum(1 for status in case.statuses if status == "blocked")
-    outcome = 1.0 if successes and not errors and not blocked else 0.5 if successes else 0.25
+    counts = case.outcome_counts
+    total = sum(counts.values()) or case.occurrences
+    successes = counts.get("success", 0)
+    errors = counts.get("error", 0)
+    blocked = counts.get("blocked", 0)
+    success_ratio = successes / total if total else 0.0
+    failure_ratio = (errors + blocked) / total if total else 0.0
+    outcome = max(0.0, min(1.0, success_ratio - 0.5 * failure_ratio))
     evidence = min(len(case.evidence_ids) / 3.0, 1.0)
-    diversity = min(len(case.statuses) / 2.0, 1.0) if case.statuses else 0.0
+    diversity = min(len(case.evidence_ids) / max(case.occurrences, 1), 1.0)
     penalty = {"low": 0.0, "medium": 0.15, "high": 0.35}.get(case.risk, 0.25)
     score = max(0.0, min(1.0, 0.35 * frequency + 0.30 * outcome + 0.20 * evidence + 0.15 * diversity - penalty))
-    reasons = [f"occurrences={case.occurrences}", f"evidence={len(case.evidence_ids)}", f"statuses={sorted(case.statuses)}"]
+    reasons = [
+        f"occurrences={case.occurrences}",
+        f"outcome_counts={dict(sorted(counts.items()))}",
+        f"evidence={len(case.evidence_ids)}",
+    ]
     if penalty:
         reasons.append(f"risk_penalty={penalty}")
-    promotable = score >= 0.75 and case.occurrences >= 3 and len(case.evidence_ids) >= 2 and case.risk == "low"
+    promotable = (
+        score >= 0.75
+        and case.occurrences >= 3
+        and len(case.evidence_ids) >= 2
+        and success_ratio >= 0.8
+        and case.risk == "low"
+    )
     if not promotable:
         reasons.append("promotion criteria not satisfied")
     return LearningConfidence(score, frequency, outcome, evidence, diversity, penalty, promotable, tuple(reasons))
