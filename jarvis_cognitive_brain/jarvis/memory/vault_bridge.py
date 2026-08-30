@@ -47,13 +47,26 @@ class NativeMemoryControllerBackend:
         self.principal = authorizer_module.Principal.AI_AGENT
 
     def search_memory(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
-        # Controller.search provides the complete native retrieval pipeline.
-        pack = self.controller.search(self.principal, query, page_size=max(1, min(limit, 100)))
+        # Controller.search provides the native authorization, lifecycle,
+        # sanitization, budget, ranking and audit boundary.
+        pack = self.controller.search(
+            self.principal,
+            query,
+            page_size=max(1, min(limit, 100)),
+        )
         return list(pack.get("results", pack.get("items", [])))
 
     def related_memory(self, note_id: str, limit: int = 20) -> list[dict[str, Any]]:
-        note = self.controller.cognitive_read(self.principal, note_id)
-        return list(note.get("results", note.get("items", [])))[:limit]
+        """Return authorized canonical data for a note.
+
+        ``cognitive_read`` returns a context pack for the requested note; it is
+        not a graph-neighbor query. Keep the contract honest and let the caller
+        decide whether to follow explicit relation IDs via another authorized
+        read path.
+        """
+        pack = self.controller.cognitive_read(self.principal, note_id)
+        results = list(pack.get("results", pack.get("items", [])))
+        return results[: max(1, min(limit, 100))]
 
     def propose_memory(self, note: dict[str, Any]) -> Any:
         return self.controller.propose(self.principal, dict(note))
@@ -62,7 +75,13 @@ class NativeMemoryControllerBackend:
 class VaultBridge:
     """Fail-closed bridge for optional native Vault integration."""
 
-    def __init__(self, vault_root: str | Path, backend: Optional[VaultBackend] = None, *, enable_native: bool = True) -> None:
+    def __init__(
+        self,
+        vault_root: str | Path,
+        backend: Optional[VaultBackend] = None,
+        *,
+        enable_native: bool = True,
+    ) -> None:
         self.root = Path(vault_root).expanduser().resolve()
         self._backend = backend
         self._status_reason = "injected backend"
