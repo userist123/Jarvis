@@ -5,7 +5,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import json
-from typing import Any, Iterable, Mapping
+import re
+from typing import Any, Mapping
+
+
+def _normalize(value: str) -> str:
+    text = str(value or "").strip().lower()
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"[.!?]+$", "", text)
+    return text
 
 
 @dataclass
@@ -46,7 +54,7 @@ class LearningCase:
 
 def fingerprint_learning(goal: str, lesson: str) -> str:
     payload = json.dumps(
-        {"goal": goal.strip().lower(), "lesson": lesson.strip().lower()},
+        {"goal": _normalize(goal), "lesson": _normalize(lesson)},
         sort_keys=True,
         separators=(",", ":"),
     )
