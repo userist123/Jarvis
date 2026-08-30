@@ -12,6 +12,7 @@ from jarvis.runtime.temporal import TemporalQuery, filter_temporal
 from jarvis.runtime.learning_review_filters import build_filtered_queue
 from jarvis.runtime.learning_review_session import LearningReviewSessionService
 from jarvis.runtime.learning_review_dashboard import ReviewerDashboardService
+from jarvis.runtime.governance_center import GovernanceCenterService
 from jarvis.runtime.review_lifecycle import ReviewLifecycleService
 from jarvis.runtime.windows_identity import WindowsIdentityProvider
 from jarvis.runtime.reviewer_identity import ReviewerIdentity
@@ -42,6 +43,7 @@ class CognitiveGateway:
         self.learning_dashboard_service = ReviewerDashboardService(self.learning_store)
         self.review_lifecycle = ReviewLifecycleService()
         self.conflict_reviews = ConflictReviewService(self.vault_bridge)
+        self.governance_center_service = GovernanceCenterService(self.learning_store, self.conflict_reviews.review_states)
         self.reviewer_identity = WindowsIdentityProvider(
             admin_subjects=frozenset(str(x).strip() for x in self.settings.reviewer_admin_subjects if str(x).strip())
         ).resolve()
@@ -51,8 +53,10 @@ class CognitiveGateway:
         self._provider_override = provider
 
     def current_reviewer_identity(self) -> ReviewerIdentity:
-        """Return the identity bound to the current desktop session."""
         return self.reviewer_identity
+
+    def governance_center(self, *, risk: str | None = None, min_confidence: float | None = None, top_n: int = 10) -> dict[str, Any]:
+        return self.governance_center_service.build(identity=self.reviewer_identity.as_dict(), risk=risk, min_confidence=min_confidence, top_n=top_n).as_dict()
 
     def provider(self, capability: str = "reasoning") -> BaseLLMProvider:
         return self._provider_override or self.router.provider(capability)
@@ -79,15 +83,12 @@ class CognitiveGateway:
         return {"results": filtered, "temporal": pack.get("temporal"), "conflicts": list((pack.get("temporal") or {}).get("conflicts", []))}
 
     def learning_review_queue(self, *, risk: str | None = None, promotable: bool | None = None, min_confidence: float | None = None, as_of: date | str | None = None, known_as_of: date | str | None = None) -> list[dict[str, Any]]:
-        """Return a read-only, optionally temporal review queue."""
         return [item.as_dict() for item in build_filtered_queue(self.learning_store.records(), risk=risk, promotable=promotable, min_confidence=min_confidence, as_of=as_of, known_as_of=known_as_of)]
 
     def reviewer_dashboard(self, *, risk: str | None = None, promotable: bool | None = None, min_confidence: float | None = None, as_of: date | str | None = None, known_as_of: date | str | None = None, top_n: int = 10) -> dict[str, Any]:
-        """Return a read-only reviewer dashboard projection."""
         return self.learning_dashboard_service.build(risk=risk, promotable=promotable, min_confidence=min_confidence, as_of=as_of, known_as_of=known_as_of, top_n=top_n).as_dict()
 
     def open_learning_review_session(self, case_id: str, *, as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
-        """Open a complete read-only learning review dossier."""
         return self.learning_review_queue_service.open(case_id, as_of=as_of, known_as_of=known_as_of).as_dict()
 
     def open_conflict_review(self, *, memory_ids: tuple[str, ...] | list[str], reasons: tuple[str, ...] | list[str], conflict_type: str = "semantic", evidence_ids: tuple[str, ...] | list[str] = (), as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
@@ -106,7 +107,6 @@ class CognitiveGateway:
         return self.conflict_reviews.verify_evidence(bundle=bundle)
 
     def verify_and_advance_conflict_review(self, *, bundle: dict[str, Any]) -> dict[str, Any]:
-        """Verify evidence and automatically advance only safe review states."""
         verification = self.conflict_reviews.verify_evidence(bundle=bundle)
         case_id = str(bundle.get("conflict_case_id") or "")
         return {"verification": verification, "review_state": self.get_review_state(case_id) if case_id else None}
