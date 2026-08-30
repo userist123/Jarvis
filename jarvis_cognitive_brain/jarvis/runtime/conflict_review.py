@@ -1,7 +1,7 @@
 """JARVIS-side conflict review facade.
 
 Creates review cases and read-only evidence snapshots from the canonical Vault.
-Resolution remains an explicit authorized operation in the Vault.
+Resolution is an explicit authorized mutation step in the Vault.
 """
 
 from __future__ import annotations
@@ -90,3 +90,37 @@ class ConflictReviewService:
             raise ValueError(f"Invalid reviewer principal: {principal!r}") from exc
         engine = AuthorizedVerdictEngine()
         return engine.issue(principal=principal_enum, reviewer=reviewer, verdict=verdict, memory_ids=memory_ids, evidence_bundle_hash=evidence_bundle_hash, evidence_valid=evidence_valid, reason=reason, as_of=as_of, known_as_of=known_as_of).as_dict()
+
+    def apply_verdict(self, *, principal: Any, verdict: dict[str, Any], evidence_verification: dict[str, Any], action: str, reason: str) -> dict[str, Any]:
+        """Apply a previously issued, verified verdict through the canonical mutation gate."""
+        self._controller()
+        try:
+            from memory_controller.authorized_verdict import AuthorizedVerdict, Verdict
+            from memory_controller.authorizer import Principal
+            from memory_controller.mutation_gate import MutationGate
+        except Exception as exc:
+            raise RuntimeError("Canonical mutation gate is unavailable") from exc
+        try:
+            principal_enum = principal if isinstance(principal, Principal) else Principal(str(principal))
+            verdict_obj = AuthorizedVerdict(
+                verdict_id=str(verdict["verdict_id"]),
+                verdict=Verdict(str(verdict["verdict"])),
+                reviewer=str(verdict["reviewer"]),
+                reviewer_principal=str(verdict["reviewer_principal"]),
+                memory_ids=tuple(str(x) for x in verdict["memory_ids"]),
+                evidence_bundle_hash=str(verdict["evidence_bundle_hash"]),
+                as_of=verdict.get("as_of"),
+                known_as_of=verdict.get("known_as_of"),
+                evidence_valid=bool(verdict["evidence_valid"]),
+                reason=str(verdict["reason"]),
+                issued_at=str(verdict["issued_at"]),
+            )
+        except (KeyError, ValueError, TypeError) as exc:
+            raise ValueError("Malformed authorized verdict") from exc
+        return MutationGate(self._controller()).apply(
+            principal=principal_enum,
+            verdict=verdict_obj,
+            evidence_verification=evidence_verification,
+            action=action,
+            reason=reason,
+        ).as_dict()
