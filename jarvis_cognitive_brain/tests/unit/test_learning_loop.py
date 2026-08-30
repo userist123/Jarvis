@@ -38,6 +38,7 @@ def test_learning_loop_persists_review_only():
     assert proposal["provenance"]["candidate_id"] == loop.last_candidate.candidate_id
     assert proposal["provenance"]["risk"] == loop.last_candidate.risk
     assert proposal["provenance"]["learning_case_id"] == loop.last_learning_case.case_id
+    assert proposal["provenance"]["confidence"] == loop.last_confidence.as_dict()
 
 
 def test_learning_proposal_id_is_deterministic():
