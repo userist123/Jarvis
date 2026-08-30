@@ -15,6 +15,9 @@ from jarvis.core.session_manager import SessionManager, SessionResumeResult
 from jarvis.core.learning_loop import LearningLoop
 from jarvis.core.reflection_engine import ReflectionResult
 from jarvis.runtime.conflict_review import ConflictReviewService
+from jarvis.runtime.learning_review_queue import LearningReviewQueue
+from jarvis.runtime.learning_store import PersistentLearningStore
+from jarvis.runtime.learning_dedup import LearningCase
 from jarvis.agents.agent_council import AgentCouncil, CouncilPlan
 from jarvis.agents.agent_registry import AgentRegistry
 from jarvis.agents.agent_router import AgentRoute, AgentRouter
@@ -31,6 +34,8 @@ class CognitiveGateway:
         self.executive = ExecutiveAdapter(self.settings.vault_path)
         self.sessions = SessionManager(self.settings)
         self.learning = LearningLoop(self.vault_bridge)
+        self.learning_store = PersistentLearningStore(".jarvis/learning_cases.json")
+        self.learning_review_queue = LearningReviewQueue()
         self.conflict_reviews = ConflictReviewService(self.vault_bridge)
         self.agent_registry = AgentRegistry(self.settings.vault_path)
         self.agent_router: AgentRouter = self.agent_registry.build_router()
@@ -97,6 +102,16 @@ class CognitiveGateway:
             confidence=confidence,
             confidence_snapshot=confidence_snapshot,
         )
+
+    def learning_review_queue(self) -> list[dict[str, Any]]:
+        """Return a deterministic, read-only review queue from persistent learning cases."""
+        objects: list[LearningCase] = []
+        for record in self.learning_store.records():
+            try:
+                objects.append(LearningCase(**record))
+            except TypeError:
+                continue
+        return [item.as_dict() for item in self.learning_review_queue.build(objects)]
 
     def process_intent(self, intent_text: str) -> dict[str, Any]:
         return self.executive.process_as_ai_agent(intent_text)
