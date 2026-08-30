@@ -39,8 +39,9 @@ class MemoryCaseStore:
     def create_from_signal(self, signal: Mapping[str, Any]) -> dict[str, Any]:
         factory = self.factory()
         item = factory.create_from_signal(signal)
-        if str(signal.get("signal_id")) not in self._records:
-            self._records[str(signal["signal_id"])] = item
+        signal_id = str(signal.get("signal_id") or "")
+        if signal_id not in self._records:
+            self._records[signal_id] = item
             self._rewrite()
         return dict(item)
 
@@ -58,6 +59,20 @@ class MemoryCaseStore:
         if changed:
             self._rewrite()
         return created
+
+    def attach_canonical_case(self, signal_id: str, canonical_case_id: str, *, status: str = "OPEN") -> dict[str, Any]:
+        key = str(signal_id)
+        if key not in self._records:
+            raise KeyError(f"Unknown signal_id: {key}")
+        record = dict(self._records[key])
+        record["canonical_case_id"] = str(canonical_case_id)
+        record["status"] = str(status)
+        metadata = dict(record.get("metadata") or {})
+        metadata["materialization"] = "canonical_conflict_review"
+        record["metadata"] = metadata
+        self._records[key] = record
+        self._rewrite()
+        return dict(record)
 
     def records(self) -> list[dict[str, Any]]:
         return [dict(self._records[key]) for key in sorted(self._records)]
