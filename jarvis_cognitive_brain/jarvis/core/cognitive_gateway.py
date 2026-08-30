@@ -13,6 +13,8 @@ from jarvis.runtime.learning_review_filters import build_filtered_queue
 from jarvis.runtime.learning_review_session import LearningReviewSessionService
 from jarvis.runtime.learning_review_dashboard import ReviewerDashboardService
 from jarvis.runtime.review_lifecycle import ReviewLifecycleService
+from jarvis.runtime.windows_identity import WindowsIdentityProvider
+from jarvis.runtime.reviewer_identity import ReviewerIdentity
 from jarvis.core.executive_adapter import ExecutiveAdapter
 from jarvis.core.cognitive_session import CognitiveSession
 from jarvis.core.session_manager import SessionManager, SessionResumeResult
@@ -40,10 +42,17 @@ class CognitiveGateway:
         self.learning_dashboard_service = ReviewerDashboardService(self.learning_store)
         self.review_lifecycle = ReviewLifecycleService()
         self.conflict_reviews = ConflictReviewService(self.vault_bridge)
+        self.reviewer_identity = WindowsIdentityProvider(
+            admin_subjects=frozenset(str(x).strip() for x in self.settings.reviewer_admin_subjects if str(x).strip())
+        ).resolve()
         self.agent_registry = AgentRegistry(self.settings.vault_path)
         self.agent_router: AgentRouter = self.agent_registry.build_router()
         self.agent_council = AgentCouncil(risky_capabilities=("iot", "iot_control", "execute_code", "network", "security"))
         self._provider_override = provider
+
+    def current_reviewer_identity(self) -> ReviewerIdentity:
+        """Return the identity bound to the current desktop session."""
+        return self.reviewer_identity
 
     def provider(self, capability: str = "reasoning") -> BaseLLMProvider:
         return self._provider_override or self.router.provider(capability)
@@ -75,14 +84,7 @@ class CognitiveGateway:
 
     def reviewer_dashboard(self, *, risk: str | None = None, promotable: bool | None = None, min_confidence: float | None = None, as_of: date | str | None = None, known_as_of: date | str | None = None, top_n: int = 10) -> dict[str, Any]:
         """Return a read-only reviewer dashboard projection."""
-        return self.learning_dashboard_service.build(
-            risk=risk,
-            promotable=promotable,
-            min_confidence=min_confidence,
-            as_of=as_of,
-            known_as_of=known_as_of,
-            top_n=top_n,
-        ).as_dict()
+        return self.learning_dashboard_service.build(risk=risk, promotable=promotable, min_confidence=min_confidence, as_of=as_of, known_as_of=known_as_of, top_n=top_n).as_dict()
 
     def open_learning_review_session(self, case_id: str, *, as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
         """Open a complete read-only learning review dossier."""
