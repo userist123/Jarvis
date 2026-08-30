@@ -8,10 +8,13 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from .review_state_store import PersistentReviewStateStore
+
 
 class ConflictReviewService:
     def __init__(self, vault_bridge: Any) -> None:
         self.vault_bridge = vault_bridge
+        self.review_states = PersistentReviewStateStore()
 
     def _controller(self) -> Any:
         if not getattr(self.vault_bridge, "available", False):
@@ -29,7 +32,18 @@ class ConflictReviewService:
         except Exception as exc:
             raise RuntimeError("Canonical conflict review workflow is unavailable") from exc
         workflow = ConflictReviewWorkflow()
-        return workflow.open_case(memory_ids=memory_ids, reasons=reasons, conflict_type=conflict_type, evidence_ids=evidence_ids, as_of=as_of, known_as_of=known_as_of).as_dict()
+        case = workflow.open_case(memory_ids=memory_ids, reasons=reasons, conflict_type=conflict_type, evidence_ids=evidence_ids, as_of=as_of, known_as_of=known_as_of)
+        self.review_states.ensure_open(case.case_id)
+        return {**case.as_dict(), "review_state": self.review_states.snapshot(case.case_id)}
+
+    def transition_review(self, *, case_id: str, target: str, actor: str, reason: str) -> dict[str, Any]:
+        self._controller()
+        self.review_states.transition(case_id, target, actor=actor, reason=reason)
+        return self.review_states.snapshot(case_id)
+
+    def review_state(self, case_id: str) -> dict[str, Any]:
+        self._controller()
+        return self.review_states.snapshot(case_id)
 
     def acquire_evidence(self, *, memory_ids: Iterable[str], conflict_case_id: str | None = None, as_of: Any = None, known_as_of: Any = None) -> dict[str, Any]:
         """Build a hash-verifiable, read-only evidence snapshot from canonical reads."""
