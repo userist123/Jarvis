@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import hashlib
 import json
 import re
@@ -14,6 +15,10 @@ def _normalize(value: str) -> str:
     text = re.sub(r"\s+", " ", text)
     text = re.sub(r"[.!?]+$", "", text)
     return text
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass
@@ -28,6 +33,9 @@ class LearningCase:
     execution_ids: set[str] = field(default_factory=set)
     statuses: set[str] = field(default_factory=set)
     outcome_counts: dict[str, int] = field(default_factory=dict)
+    first_observed_at: str = ""
+    last_observed_at: str = ""
+    knowledge_times: set[str] = field(default_factory=set)
 
     def add(self, observation: Mapping[str, Any]) -> None:
         self.occurrences += 1
@@ -40,6 +48,13 @@ class LearningCase:
             normalized = str(status)
             self.statuses.add(normalized)
             self.outcome_counts[normalized] = self.outcome_counts.get(normalized, 0) + 1
+        observed_at = str(observation.get("observed_at") or _now())
+        if not self.first_observed_at:
+            self.first_observed_at = observed_at
+        self.last_observed_at = observed_at
+        known_at = observation.get("known_as_of") or observation.get("knowledge_time")
+        if known_at:
+            self.knowledge_times.add(str(known_at))
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -53,6 +68,9 @@ class LearningCase:
             "execution_ids": sorted(self.execution_ids),
             "statuses": sorted(self.statuses),
             "outcome_counts": dict(sorted(self.outcome_counts.items())),
+            "first_observed_at": self.first_observed_at,
+            "last_observed_at": self.last_observed_at,
+            "knowledge_times": sorted(self.knowledge_times),
         }
 
 
