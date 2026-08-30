@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, Dict, Mapping, Optional
 
 from jarvis.config import Settings, get_settings
@@ -7,6 +8,7 @@ from jarvis.llm.base import BaseLLMProvider, CancellationToken
 from jarvis.llm.model_router import ModelRouter
 from jarvis.memory.vault_context import VaultContextLoader
 from jarvis.memory.vault_bridge import VaultBridge
+from jarvis.runtime.temporal import TemporalQuery, filter_temporal
 from jarvis.core.executive_adapter import ExecutiveAdapter
 from jarvis.core.cognitive_session import CognitiveSession
 from jarvis.core.session_manager import SessionManager, SessionResumeResult
@@ -55,12 +57,22 @@ class CognitiveGateway:
         )
         return routes, plan
 
-    def search_vault(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
-        """Search native Vault memory when available; otherwise return no native hits."""
-        return self.vault_bridge.search_memory(query, limit=limit)
+    def search_vault(
+        self,
+        query: str,
+        limit: int = 20,
+        *,
+        as_of: date | str | None = None,
+        known_as_of: date | str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Search canonical Vault memory with optional bitemporal filtering."""
+        results = self.vault_bridge.search_memory(query, limit=limit)
+        temporal = TemporalQuery.from_values(as_of=as_of, known_as_of=known_as_of)
+        if temporal.as_of is None and temporal.known_as_of is None:
+            return results
+        return list(filter_temporal(results, temporal))
 
     def process_intent(self, intent_text: str) -> dict[str, Any]:
-        """Delegate an intent to the canonical Vault Executive when available."""
         return self.executive.process_as_ai_agent(intent_text)
 
     def new_session(self, goal: str = "") -> CognitiveSession:
@@ -80,7 +92,6 @@ class CognitiveGateway:
         observation: Mapping[str, Any],
         evidence_ids: tuple[str, ...] = (),
     ) -> tuple[ReflectionResult, Any]:
-        """Reflect on an outcome and submit only a REVIEW proposal."""
         return self.learning.learn(
             goal=goal,
             expected=expected,
