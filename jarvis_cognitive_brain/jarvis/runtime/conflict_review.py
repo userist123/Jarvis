@@ -95,8 +95,8 @@ class ConflictReviewService:
             as_of=as_of, known_as_of=known_as_of,
         ).as_dict()
 
-    def apply_verdict(self, *, principal: Any, verdict: dict[str, Any], evidence_verification: dict[str, Any], action: str, reason: str) -> dict[str, Any]:
-        """Apply a previously issued, verified verdict through the canonical mutation gate."""
+    def apply_verdict(self, *, principal: Any, verdict: dict[str, Any], evidence_verification: dict[str, Any], review_state: dict[str, Any], action: str, reason: str) -> dict[str, Any]:
+        """Apply an approved, previously issued verdict through the canonical mutation gate."""
         self._controller()
         try:
             from memory_controller.authorized_verdict import AuthorizedVerdict, Verdict
@@ -119,7 +119,9 @@ class ConflictReviewService:
             raise ValueError("Malformed authorized verdict") from exc
         return MutationGate(self._controller()).apply(
             principal=principal_enum, verdict=verdict_obj,
-            evidence_verification=evidence_verification, action=action, reason=reason,
+            evidence_verification=evidence_verification,
+            review_state=review_state,
+            action=action, reason=reason,
         ).as_dict()
 
     def promote_learning_candidate(
