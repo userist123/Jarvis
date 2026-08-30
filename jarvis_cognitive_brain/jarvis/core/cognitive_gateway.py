@@ -34,9 +34,7 @@ class CognitiveGateway:
         self.conflict_reviews = ConflictReviewService(self.vault_bridge)
         self.agent_registry = AgentRegistry(self.settings.vault_path)
         self.agent_router: AgentRouter = self.agent_registry.build_router()
-        self.agent_council = AgentCouncil(
-            risky_capabilities=("iot", "iot_control", "execute_code", "network", "security")
-        )
+        self.agent_council = AgentCouncil(risky_capabilities=("iot", "iot_control", "execute_code", "network", "security"))
         self._provider_override = provider
 
     def provider(self, capability: str = "reasoning") -> BaseLLMProvider:
@@ -73,17 +71,16 @@ class CognitiveGateway:
         return self.conflict_reviews.verify_evidence(bundle=bundle)
 
     def issue_conflict_verdict(self, *, principal: str, reviewer: str, verdict: str, memory_ids: tuple[str, ...] | list[str], evidence_bundle_hash: str, evidence_valid: bool, reason: str, as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
-        """Issue an authorized review verdict; no memory mutation is performed."""
-        return self.conflict_reviews.issue_verdict(
+        return self.conflict_reviews.issue_verdict(principal=principal, reviewer=reviewer, verdict=verdict, memory_ids=memory_ids, evidence_bundle_hash=evidence_bundle_hash, evidence_valid=evidence_valid, reason=reason, as_of=as_of, known_as_of=known_as_of)
+
+    def apply_conflict_verdict(self, *, principal: str, verdict: dict[str, Any], evidence_verification: dict[str, Any], action: str, reason: str) -> dict[str, Any]:
+        """Apply a verified verdict through the canonical mutation gate."""
+        return self.conflict_reviews.apply_verdict(
             principal=principal,
-            reviewer=reviewer,
             verdict=verdict,
-            memory_ids=memory_ids,
-            evidence_bundle_hash=evidence_bundle_hash,
-            evidence_valid=evidence_valid,
+            evidence_verification=evidence_verification,
+            action=action,
             reason=reason,
-            as_of=as_of,
-            known_as_of=known_as_of,
         )
 
     def process_intent(self, intent_text: str) -> dict[str, Any]:
