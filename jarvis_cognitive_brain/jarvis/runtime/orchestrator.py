@@ -8,6 +8,7 @@ from typing import Any, Optional
 from jarvis.config import Settings, get_settings
 from jarvis.core.cognitive_gateway import CognitiveGateway
 from jarvis.runtime.context_pack import ContextPack, build_evidence
+from jarvis.runtime.execution_observation import ExecutionObservation, observation_from_turn
 from jarvis.runtime.facade import RuntimeFacade, RuntimeTurn
 
 
@@ -15,6 +16,7 @@ from jarvis.runtime.facade import RuntimeFacade, RuntimeTurn
 class ConversationTurn:
     user_text: str
     execution: RuntimeTurn
+    observation: ExecutionObservation
     context: ContextPack
     response: str
 
@@ -56,7 +58,7 @@ class TurnOrchestrator:
         elif "verified" in statuses:
             evidence_status = "verified"
         else:
-            evidence_status = "unverified" if evidence else "unverified"
+            evidence_status = "unverified"
         constraints = list(_status_constraints(str(result.get("status", "unknown"))))
         constraints.append(f"Evidence status: {evidence_status}.")
         return ContextPack(
@@ -74,6 +76,7 @@ class TurnOrchestrator:
         history: Optional[list[dict[str, str]]] = None,
     ) -> ConversationTurn:
         execution = self.facade.execute(user_text)
+        observation = observation_from_turn(user_text, execution.result)
         context = self.build_context(user_text, execution)
         prompt = (
             "Respond to the user's request using the grounded context pack below. "
@@ -93,6 +96,7 @@ class TurnOrchestrator:
         return ConversationTurn(
             user_text=user_text,
             execution=execution,
+            observation=observation,
             context=context,
             response=response,
         )
