@@ -42,96 +42,36 @@ class CognitiveGateway:
     def provider(self, capability: str = "reasoning") -> BaseLLMProvider:
         return self._provider_override or self.router.provider(capability)
 
-    def route_agents(
-        self,
-        task: str,
-        required_capabilities: tuple[str, ...] = (),
-        *,
-        complexity: int = 1,
-        require_review: bool = False,
-    ) -> tuple[list[AgentRoute], CouncilPlan]:
+    def route_agents(self, task: str, required_capabilities: tuple[str, ...] = (), *, complexity: int = 1, require_review: bool = False) -> tuple[list[AgentRoute], CouncilPlan]:
         routes = self.agent_router.rank(task, required_capabilities)
-        plan = self.agent_council.plan(
-            routes,
-            required_capabilities,
-            complexity=complexity,
-            require_review=require_review,
-        )
+        plan = self.agent_council.plan(routes, required_capabilities, complexity=complexity, require_review=require_review)
         return routes, plan
 
-    def search_vault(
-        self,
-        query: str,
-        limit: int = 20,
-        *,
-        as_of: date | str | None = None,
-        known_as_of: date | str | None = None,
-    ) -> list[dict[str, Any]]:
+    def search_vault(self, query: str, limit: int = 20, *, as_of: date | str | None = None, known_as_of: date | str | None = None) -> list[dict[str, Any]]:
         temporal = TemporalQuery.from_values(as_of=as_of, known_as_of=known_as_of)
         if temporal.as_of is None and temporal.known_as_of is None:
             return self.vault_bridge.search_memory(query, limit=limit)
-        results = self.vault_bridge.search_memory_temporal(
-            query, limit=limit, as_of=temporal.as_of, known_as_of=temporal.known_as_of
-        )
+        results = self.vault_bridge.search_memory_temporal(query, limit=limit, as_of=temporal.as_of, known_as_of=temporal.known_as_of)
         return list(filter_temporal(results, temporal))
 
-    def search_vault_snapshot(
-        self,
-        query: str,
-        limit: int = 20,
-        *,
-        as_of: date | str | None = None,
-        known_as_of: date | str | None = None,
-    ) -> dict[str, Any]:
+    def search_vault_snapshot(self, query: str, limit: int = 20, *, as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
         temporal = TemporalQuery.from_values(as_of=as_of, known_as_of=known_as_of)
         if temporal.as_of is None and temporal.known_as_of is None:
             return {"results": self.vault_bridge.search_memory(query, limit=limit), "temporal": None, "conflicts": []}
-        pack = self.vault_bridge.search_memory_temporal_pack(
-            query, limit=limit, as_of=temporal.as_of, known_as_of=temporal.known_as_of
-        )
+        pack = self.vault_bridge.search_memory_temporal_pack(query, limit=limit, as_of=temporal.as_of, known_as_of=temporal.known_as_of)
         results = list(pack.get("results", pack.get("items", [])))
         filtered = list(filter_temporal(results, temporal))
-        return {
-            "results": filtered,
-            "temporal": pack.get("temporal"),
-            "conflicts": list((pack.get("temporal") or {}).get("conflicts", [])),
-        }
+        return {"results": filtered, "temporal": pack.get("temporal"), "conflicts": list((pack.get("temporal") or {}).get("conflicts", []))}
 
-    def open_conflict_review(
-        self,
-        *,
-        memory_ids: tuple[str, ...] | list[str],
-        reasons: tuple[str, ...] | list[str],
-        conflict_type: str = "semantic",
-        evidence_ids: tuple[str, ...] | list[str] = (),
-        as_of: date | str | None = None,
-        known_as_of: date | str | None = None,
-    ) -> dict[str, Any]:
-        """Open an auditable review case; does not resolve or mutate memory."""
-        return self.conflict_reviews.open_case(
-            memory_ids=memory_ids,
-            reasons=reasons,
-            conflict_type=conflict_type,
-            evidence_ids=evidence_ids,
-            as_of=as_of,
-            known_as_of=known_as_of,
-        )
+    def open_conflict_review(self, *, memory_ids: tuple[str, ...] | list[str], reasons: tuple[str, ...] | list[str], conflict_type: str = "semantic", evidence_ids: tuple[str, ...] | list[str] = (), as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
+        return self.conflict_reviews.open_case(memory_ids=memory_ids, reasons=reasons, conflict_type=conflict_type, evidence_ids=evidence_ids, as_of=as_of, known_as_of=known_as_of)
 
-    def acquire_conflict_evidence(
-        self,
-        *,
-        memory_ids: tuple[str, ...] | list[str],
-        conflict_case_id: str | None = None,
-        as_of: date | str | None = None,
-        known_as_of: date | str | None = None,
-    ) -> dict[str, Any]:
-        """Acquire a read-only, hash-verifiable evidence bundle."""
-        return self.conflict_reviews.acquire_evidence(
-            memory_ids=memory_ids,
-            conflict_case_id=conflict_case_id,
-            as_of=as_of,
-            known_as_of=known_as_of,
-        )
+    def acquire_conflict_evidence(self, *, memory_ids: tuple[str, ...] | list[str], conflict_case_id: str | None = None, as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
+        return self.conflict_reviews.acquire_evidence(memory_ids=memory_ids, conflict_case_id=conflict_case_id, as_of=as_of, known_as_of=known_as_of)
+
+    def verify_conflict_evidence(self, *, bundle: dict[str, Any]) -> dict[str, Any]:
+        """Re-read canonical memories and verify evidence integrity without mutation."""
+        return self.conflict_reviews.verify_evidence(bundle=bundle)
 
     def process_intent(self, intent_text: str) -> dict[str, Any]:
         return self.executive.process_as_ai_agent(intent_text)
@@ -145,20 +85,8 @@ class CognitiveGateway:
     def resume_session(self, session_id: str) -> SessionResumeResult:
         return self.sessions.resume(session_id)
 
-    def reflect_and_learn(
-        self,
-        *,
-        goal: str,
-        expected: str,
-        observation: Mapping[str, Any],
-        evidence_ids: tuple[str, ...] = (),
-    ) -> tuple[ReflectionResult, Any]:
-        return self.learning.learn(
-            goal=goal,
-            expected=expected,
-            observation=observation,
-            evidence_ids=evidence_ids,
-        )
+    def reflect_and_learn(self, *, goal: str, expected: str, observation: Mapping[str, Any], evidence_ids: tuple[str, ...] = ()) -> tuple[ReflectionResult, Any]:
+        return self.learning.learn(goal=goal, expected=expected, observation=observation, evidence_ids=evidence_ids)
 
     def build_system_prompt(self, base_prompt: str = "", max_chars: int = 24000) -> str:
         context = self.vault.load(max_chars=max_chars)
