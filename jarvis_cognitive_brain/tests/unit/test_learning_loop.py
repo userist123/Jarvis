@@ -24,7 +24,7 @@ def test_learning_loop_persists_review_only():
     result, persisted = loop.learn(
         goal="demo",
         expected="done",
-        observation={"success": True, "result": "ok"},
+        observation={"status": "success", "success": True, "result": "ok"},
         evidence_ids=("obs-1",),
     )
     proposal = backend.proposals[0]
@@ -37,6 +37,7 @@ def test_learning_loop_persists_review_only():
     assert proposal["provenance"]["evidence_ids"] == ["obs-1"]
     assert proposal["provenance"]["candidate_id"] == loop.last_candidate.candidate_id
     assert proposal["provenance"]["risk"] == loop.last_candidate.risk
+    assert proposal["provenance"]["learning_case_id"] == loop.last_learning_case.case_id
 
 
 def test_learning_proposal_id_is_deterministic():
@@ -46,10 +47,12 @@ def test_learning_proposal_id_is_deterministic():
     kwargs = {
         "goal": "demo",
         "expected": "done",
-        "observation": {"success": True, "result": "ok"},
+        "observation": {"status": "success", "success": True, "result": "ok"},
         "evidence_ids": ("obs-1", "obs-2"),
     }
     loop.learn(**kwargs)
     loop.learn(**kwargs)
     assert backend.proposals[0]["id"] == backend.proposals[1]["id"]
     assert backend.proposals[0]["provenance"]["candidate_id"] == backend.proposals[1]["provenance"]["candidate_id"]
+    assert loop.last_learning_case.occurrences == 2
+    assert backend.proposals[1]["provenance"]["occurrences"] == 2
