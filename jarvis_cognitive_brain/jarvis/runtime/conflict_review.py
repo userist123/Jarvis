@@ -76,7 +76,7 @@ class ConflictReviewService:
                 notes.append(dict(results[0]))
         return verify_evidence_bundle(bundle, notes).as_dict()
 
-    def issue_verdict(self, *, reviewer: str, verdict: str, memory_ids: Iterable[str], evidence_bundle_hash: str, evidence_valid: bool, reason: str, as_of: Any = None, known_as_of: Any = None) -> dict[str, Any]:
+    def issue_verdict(self, *, principal: Any, reviewer: str, verdict: str, memory_ids: Iterable[str], evidence_bundle_hash: str, evidence_valid: bool, reason: str, as_of: Any = None, known_as_of: Any = None) -> dict[str, Any]:
         """Issue an authorized review verdict without mutating memory."""
         self._controller()
         try:
@@ -84,7 +84,9 @@ class ConflictReviewService:
             from memory_controller.authorizer import Principal
         except Exception as exc:
             raise RuntimeError("Canonical authorized verdict engine is unavailable") from exc
-        # JARVIS itself is never the reviewer; human/admin identity must be supplied explicitly.
-        principal = Principal.HUMAN
+        try:
+            principal_enum = principal if isinstance(principal, Principal) else Principal(str(principal))
+        except ValueError as exc:
+            raise ValueError(f"Invalid reviewer principal: {principal!r}") from exc
         engine = AuthorizedVerdictEngine()
-        return engine.issue(principal=principal, reviewer=reviewer, verdict=verdict, memory_ids=memory_ids, evidence_bundle_hash=evidence_bundle_hash, evidence_valid=evidence_valid, reason=reason, as_of=as_of, known_as_of=known_as_of).as_dict()
+        return engine.issue(principal=principal_enum, reviewer=reviewer, verdict=verdict, memory_ids=memory_ids, evidence_bundle_hash=evidence_bundle_hash, evidence_valid=evidence_valid, reason=reason, as_of=as_of, known_as_of=known_as_of).as_dict()
