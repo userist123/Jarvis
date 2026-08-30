@@ -11,6 +11,8 @@ from jarvis.memory.vault_bridge import VaultBridge
 from jarvis.runtime.temporal import TemporalQuery, filter_temporal
 from jarvis.runtime.learning_review_filters import build_filtered_queue
 from jarvis.runtime.learning_review_session import LearningReviewSessionService
+from jarvis.runtime.learning_review_dashboard import ReviewerDashboardService
+from jarvis.runtime.review_lifecycle import ReviewLifecycleService
 from jarvis.core.executive_adapter import ExecutiveAdapter
 from jarvis.core.cognitive_session import CognitiveSession
 from jarvis.core.session_manager import SessionManager, SessionResumeResult
@@ -35,6 +37,8 @@ class CognitiveGateway:
         self.learning = LearningLoop(self.vault_bridge)
         self.learning_store = self.learning.store
         self.learning_review_queue_service = LearningReviewSessionService(self.learning_store)
+        self.learning_dashboard_service = ReviewerDashboardService(self.learning_store)
+        self.review_lifecycle = ReviewLifecycleService()
         self.conflict_reviews = ConflictReviewService(self.vault_bridge)
         self.agent_registry = AgentRegistry(self.settings.vault_path)
         self.agent_router: AgentRouter = self.agent_registry.build_router()
@@ -69,6 +73,17 @@ class CognitiveGateway:
         """Return a read-only, optionally temporal review queue."""
         return [item.as_dict() for item in build_filtered_queue(self.learning_store.records(), risk=risk, promotable=promotable, min_confidence=min_confidence, as_of=as_of, known_as_of=known_as_of)]
 
+    def reviewer_dashboard(self, *, risk: str | None = None, promotable: bool | None = None, min_confidence: float | None = None, as_of: date | str | None = None, known_as_of: date | str | None = None, top_n: int = 10) -> dict[str, Any]:
+        """Return a read-only reviewer dashboard projection."""
+        return self.learning_dashboard_service.build(
+            risk=risk,
+            promotable=promotable,
+            min_confidence=min_confidence,
+            as_of=as_of,
+            known_as_of=known_as_of,
+            top_n=top_n,
+        ).as_dict()
+
     def open_learning_review_session(self, case_id: str, *, as_of: date | str | None = None, known_as_of: date | str | None = None) -> dict[str, Any]:
         """Open a complete read-only learning review dossier."""
         return self.learning_review_queue_service.open(case_id, as_of=as_of, known_as_of=known_as_of).as_dict()
@@ -98,11 +113,19 @@ class CognitiveGateway:
         return self.conflict_reviews.issue_verdict(principal=principal, reviewer=reviewer, verdict=verdict, memory_ids=memory_ids, evidence_bundle_hash=evidence_bundle_hash, evidence_valid=evidence_valid, reason=reason, as_of=as_of, known_as_of=known_as_of)
 
     def apply_conflict_verdict(self, *, principal: str, verdict: dict[str, Any], evidence_verification: dict[str, Any], review_state: dict[str, Any], action: str, reason: str) -> dict[str, Any]:
-        """Apply a verdict only when its review case is APPROVED or correctly DEFERRED."""
         return self.conflict_reviews.apply_verdict(principal=principal, verdict=verdict, evidence_verification=evidence_verification, review_state=review_state, action=action, reason=reason)
 
     def promote_learning_candidate(self, *, principal: str, reviewer: str, memory_id: str, evidence_verification: dict[str, Any], evidence_bundle_hash: str, confidence: dict[str, Any], confidence_snapshot: dict[str, Any]) -> dict[str, Any]:
         return self.conflict_reviews.promote_learning_candidate(principal=principal, reviewer=reviewer, memory_id=memory_id, evidence_verification=evidence_verification, evidence_bundle_hash=evidence_bundle_hash, confidence=confidence, confidence_snapshot=confidence_snapshot)
+
+    def review_case_auto_advance(self, *, case_id: str, evidence_verification: Mapping[str, Any], actor: str = "system") -> dict[str, Any]:
+        return self.review_lifecycle.auto_advance_after_evidence(case_id, evidence_verification=evidence_verification, actor=actor).as_dict()
+
+    def record_review_decision(self, *, case_id: str, decision: str, actor: str, reason: str) -> dict[str, Any]:
+        return self.review_lifecycle.record_decision(case_id, decision=decision, actor=actor, reason=reason)
+
+    def close_review_case(self, *, case_id: str, actor: str, reason: str) -> dict[str, Any]:
+        return self.review_lifecycle.close(case_id, actor=actor, reason=reason)
 
     def process_intent(self, intent_text: str) -> dict[str, Any]:
         return self.executive.process_as_ai_agent(intent_text)
