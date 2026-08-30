@@ -122,8 +122,18 @@ class ConflictReviewService:
             evidence_verification=evidence_verification, action=action, reason=reason,
         ).as_dict()
 
-    def promote_learning_candidate(self, *, principal: Any, reviewer: str, memory_id: str, evidence_verification: dict[str, Any], evidence_bundle_hash: str) -> dict[str, Any]:
-        """Promote a verified learning candidate through the canonical learning gate."""
+    def promote_learning_candidate(
+        self,
+        *,
+        principal: Any,
+        reviewer: str,
+        memory_id: str,
+        evidence_verification: dict[str, Any],
+        evidence_bundle_hash: str,
+        confidence: dict[str, Any],
+        confidence_snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Promote a learning candidate only with verified evidence and bound confidence."""
         controller = self._controller()
         try:
             from memory_controller.learning_promotion_gate import LearningPromotionGate
@@ -140,4 +150,6 @@ class ConflictReviewService:
             memory_id=memory_id,
             evidence_verification=evidence_verification,
             evidence_bundle_hash=evidence_bundle_hash,
+            confidence=confidence,
+            confidence_snapshot=confidence_snapshot,
         ).as_dict()
