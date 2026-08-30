@@ -38,6 +38,12 @@ class GovernanceCenterService:
 
     def build(self, *, identity: dict[str, Any], risk: str | None = None, min_confidence: float | None = None, top_n: int = 10) -> GovernanceCenter:
         learning = self.learning_dashboard.build(risk=risk, min_confidence=min_confidence, top_n=top_n).as_dict()
+        learning_items = build_filtered_queue(
+            self.learning_store.records(),
+            risk=risk,
+            min_confidence=min_confidence,
+        )
+
         states = self.review_states.all()
         conflicts_by_state: dict[str, int] = {}
         pending: list[dict[str, Any]] = []
@@ -46,11 +52,24 @@ class GovernanceCenterService:
             conflicts_by_state[value] = conflicts_by_state.get(value, 0) + 1
             if value in {"EVIDENCE_PENDING", "VERIFIED", "DECISION_PENDING"}:
                 pending.append({
+                    "kind": "conflict",
                     "case_id": str(state.get("case_id", "")),
                     "state": value,
                     "can_apply_mutation": bool(state.get("can_apply_mutation", False)),
                 })
-        pending.sort(key=lambda item: (item["state"], item["case_id"]))
+
+        for item in learning_items[: max(0, int(top_n))]:
+            pending.append({
+                "kind": "learning",
+                "case_id": str(item.case_id),
+                "state": "REVIEW",
+                "can_apply_mutation": False,
+                "confidence": item.confidence_score,
+                "risk": item.risk,
+                "promotable": item.promotable,
+            })
+
+        pending.sort(key=lambda item: (item["kind"], item["state"], item["case_id"]))
         return GovernanceCenter(
             identity=identity,
             learning=learning,
