@@ -38,13 +38,31 @@ class LearningCase:
     knowledge_times: set[str] = field(default_factory=set)
     observations: list[dict[str, Any]] = field(default_factory=list)
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "LearningCase":
+        return cls(
+            case_id=str(data.get("case_id", "")),
+            fingerprint=str(data.get("fingerprint", "")),
+            goal=str(data.get("goal", "")),
+            lesson=str(data.get("lesson", "")),
+            risk=str(data.get("risk", "low")),
+            occurrences=int(data.get("occurrences", 0)),
+            evidence_ids={str(x) for x in data.get("evidence_ids", [])},
+            execution_ids={str(x) for x in data.get("execution_ids", [])},
+            statuses={str(x) for x in data.get("statuses", [])},
+            outcome_counts={str(k): int(v) for k, v in dict(data.get("outcome_counts", {})).items()},
+            first_observed_at=str(data.get("first_observed_at", "")),
+            last_observed_at=str(data.get("last_observed_at", "")),
+            knowledge_times={str(x) for x in data.get("knowledge_times", [])},
+            observations=[dict(x) for x in data.get("observations", []) if isinstance(x, Mapping)],
+        )
+
     def add(self, observation: Mapping[str, Any]) -> None:
         observed_at = str(observation.get("observed_at") or _now())
         known_at = observation.get("known_as_of") or observation.get("knowledge_time") or observed_at
         status = str(observation.get("status") or "unknown")
         evidence = tuple(str(x) for x in (observation.get("evidence_ids") or ()) if x)
         execution_id = str(observation.get("execution_id") or "")
-
         self.occurrences += 1
         self.evidence_ids.update(evidence)
         if execution_id:
@@ -56,7 +74,6 @@ class LearningCase:
             self.first_observed_at = observed_at
         if not self.last_observed_at or observed_at > self.last_observed_at:
             self.last_observed_at = observed_at
-
         self.observations.append({
             "observed_at": observed_at,
             "knowledge_time": str(known_at),
@@ -67,11 +84,7 @@ class LearningCase:
 
     def snapshot_observations(self, *, as_of: str | datetime | None = None, known_as_of: str | datetime | None = None) -> list[dict[str, Any]]:
         from .temporal_learning import observation_visible_at
-        return [
-            dict(item)
-            for item in self.observations
-            if observation_visible_at(item, as_of=as_of, known_as_of=known_as_of)
-        ]
+        return [dict(item) for item in self.observations if observation_visible_at(item, as_of=as_of, known_as_of=known_as_of)]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -93,11 +106,7 @@ class LearningCase:
 
 
 def fingerprint_learning(goal: str, lesson: str) -> str:
-    payload = json.dumps(
-        {"goal": _normalize(goal), "lesson": _normalize(lesson)},
-        sort_keys=True,
-        separators=(",", ":"),
-    )
+    payload = json.dumps({"goal": _normalize(goal), "lesson": _normalize(lesson)}, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -105,24 +114,18 @@ class LearningDeduplicator:
     def __init__(self) -> None:
         self._cases: dict[str, LearningCase] = {}
 
-    def record(
-        self,
-        *,
-        goal: str,
-        lesson: str,
-        risk: str,
-        observation: Mapping[str, Any],
-    ) -> LearningCase:
+    def restore(self, records: list[Mapping[str, Any]]) -> None:
+        self._cases = {}
+        for record in records:
+            case = LearningCase.from_dict(record)
+            if case.fingerprint and case.case_id:
+                self._cases[case.fingerprint] = case
+
+    def record(self, *, goal: str, lesson: str, risk: str, observation: Mapping[str, Any]) -> LearningCase:
         fingerprint = fingerprint_learning(goal, lesson)
         case = self._cases.get(fingerprint)
         if case is None:
-            case = LearningCase(
-                case_id=f"LC-{fingerprint[:16]}",
-                fingerprint=fingerprint,
-                goal=goal,
-                lesson=lesson,
-                risk=risk,
-            )
+            case = LearningCase(case_id=f"LC-{fingerprint[:16]}", fingerprint=fingerprint, goal=goal, lesson=lesson, risk=risk)
             self._cases[fingerprint] = case
         case.add(observation)
         if risk == "high" or case.risk == "high":
