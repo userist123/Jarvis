@@ -8,12 +8,20 @@ from jarvis.core.self_improvement import LearningCandidate, SelfImprovementWorkf
 from jarvis.memory.vault_bridge import VaultBridge
 from jarvis.runtime.learning_trigger import LearningTrigger
 from jarvis.runtime.learning_confidence import assess_learning_confidence
+from jarvis.runtime.learning_store import PersistentLearningStore
 
 
 class LearningLoop:
     """Post-action learning loop with explicit REVIEW-only persistence."""
 
-    def __init__(self, vault_bridge: VaultBridge, reflection: Optional[ReflectionEngine] = None) -> None:
+    def __init__(
+        self,
+        vault_bridge: VaultBridge,
+        reflection: Optional[ReflectionEngine] = None,
+        *,
+        store: Optional[PersistentLearningStore] = None,
+        store_path: Optional[str] = None,
+    ) -> None:
         self.vault = vault_bridge
         self.reflection = reflection or ReflectionEngine()
         self.self_improvement = SelfImprovementWorkflow()
@@ -21,6 +29,7 @@ class LearningLoop:
         self.last_candidate: Optional[LearningCandidate] = None
         self.last_learning_case: Any = None
         self.last_confidence: Any = None
+        self.store = store or PersistentLearningStore(store_path or ".jarvis/learning_cases.json")
 
     @staticmethod
     def _proposal_id(goal: str, lesson: str, evidence_ids: tuple[str, ...]) -> str:
@@ -62,6 +71,7 @@ class LearningLoop:
             self.last_confidence = None
             return result, None
 
+        self.store.upsert(learning_case)
         confidence = assess_learning_confidence(learning_case)
         self.last_confidence = confidence
 
