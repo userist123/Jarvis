@@ -69,6 +69,18 @@ class ConflictReviewerWindow(tk.Toplevel):
     def _button(parent: ttk.Frame, text: str, command: Any, column: int) -> None:
         ttk.Button(parent, text=text, command=command).grid(row=0, column=column, padx=(0, 6))
 
+    def load_case(self, case_id: str) -> None:
+        """Load an existing conflict case without creating or mutating it."""
+        try:
+            state = self.gateway.get_review_state(case_id)
+            self.case = {"case_id": case_id, "review_state": state}
+            self.decision_state = dict(state)
+            self.status.set(f"Loaded: {case_id} / {state.get('state', '-')}")
+            self._show(self.case)
+            self._update_controls()
+        except Exception as exc:
+            self._error(exc)
+
     def _ids(self) -> tuple[str, ...]:
         return tuple(dict.fromkeys(x.strip() for x in self.memory_ids.get().split(",") if x.strip()))
 
@@ -126,13 +138,10 @@ class ConflictReviewerWindow(tk.Toplevel):
             return
         try:
             self.verdict = self.reviewer.issue_conflict_verdict(
-                verdict=verdict,
-                memory_ids=self._ids(),
+                verdict=verdict, memory_ids=self._ids(),
                 evidence_bundle_hash=str(self.bundle.get("bundle_hash") or ""),
-                evidence_valid=True,
-                reason="Reviewer decision from Conflict Review UI",
-                as_of=self.bundle.get("as_of"),
-                known_as_of=self.bundle.get("known_as_of"),
+                evidence_valid=True, reason="Reviewer decision from Conflict Review UI",
+                as_of=self.bundle.get("as_of"), known_as_of=self.bundle.get("known_as_of"),
             )
             target_state = "DEFERRED" if verdict == "DEFER" else "APPROVED"
             self.decision_state = self.reviewer.transition_review_state(case_id=case_id, target=target_state, reason=f"Reviewer issued {verdict}")
@@ -155,10 +164,8 @@ class ConflictReviewerWindow(tk.Toplevel):
             return
         try:
             result = self.reviewer.apply_conflict_verdict(
-                verdict=self.verdict,
-                evidence_verification=self.verification,
-                review_state=self.decision_state,
-                action="attest",
+                verdict=self.verdict, evidence_verification=self.verification,
+                review_state=self.decision_state, action="attest",
                 reason="Apply authorized conflict decision",
             )
             self.status.set("Mutation result received")
