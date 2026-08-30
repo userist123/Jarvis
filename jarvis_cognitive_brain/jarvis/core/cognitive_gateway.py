@@ -69,16 +69,38 @@ class CognitiveGateway:
         temporal = TemporalQuery.from_values(as_of=as_of, known_as_of=known_as_of)
         if temporal.as_of is None and temporal.known_as_of is None:
             return self.vault_bridge.search_memory(query, limit=limit)
-
         results = self.vault_bridge.search_memory_temporal(
             query,
             limit=limit,
             as_of=temporal.as_of,
             known_as_of=temporal.known_as_of,
         )
-        # Legacy bridges may not expose temporal filtering; keep the contract
-        # correct by applying the same deterministic predicate as a fallback.
         return list(filter_temporal(results, temporal))
+
+    def search_vault_snapshot(
+        self,
+        query: str,
+        limit: int = 20,
+        *,
+        as_of: date | str | None = None,
+        known_as_of: date | str | None = None,
+    ) -> dict[str, Any]:
+        """Return results plus temporal/conflict metadata for UI and grounding."""
+        temporal = TemporalQuery.from_values(as_of=as_of, known_as_of=known_as_of)
+        if temporal.as_of is None and temporal.known_as_of is None:
+            return {"results": self.vault_bridge.search_memory(query, limit=limit), "temporal": None, "conflicts": []}
+        pack = self.vault_bridge.search_memory_temporal_pack(
+            query,
+            limit=limit,
+            as_of=temporal.as_of,
+            known_as_of=temporal.known_as_of,
+        )
+        results = list(pack.get("results", pack.get("items", [])))
+        return {
+            "results": list(filter_temporal(results, temporal)),
+            "temporal": pack.get("temporal"),
+            "conflicts": list((pack.get("temporal") or {}).get("conflicts", [])),
+        }
 
     def process_intent(self, intent_text: str) -> dict[str, Any]:
         return self.executive.process_as_ai_agent(intent_text)
