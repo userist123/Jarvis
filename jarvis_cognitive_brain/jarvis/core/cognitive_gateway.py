@@ -66,10 +66,18 @@ class CognitiveGateway:
         known_as_of: date | str | None = None,
     ) -> list[dict[str, Any]]:
         """Search canonical Vault memory with optional bitemporal filtering."""
-        results = self.vault_bridge.search_memory(query, limit=limit)
         temporal = TemporalQuery.from_values(as_of=as_of, known_as_of=known_as_of)
         if temporal.as_of is None and temporal.known_as_of is None:
-            return results
+            return self.vault_bridge.search_memory(query, limit=limit)
+
+        results = self.vault_bridge.search_memory_temporal(
+            query,
+            limit=limit,
+            as_of=temporal.as_of,
+            known_as_of=temporal.known_as_of,
+        )
+        # Legacy bridges may not expose temporal filtering; keep the contract
+        # correct by applying the same deterministic predicate as a fallback.
         return list(filter_temporal(results, temporal))
 
     def process_intent(self, intent_text: str) -> dict[str, Any]:
