@@ -9,12 +9,14 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from .review_state_store import PersistentReviewStateStore
+from .review_automation import ReviewAutomation
 
 
 class ConflictReviewService:
     def __init__(self, vault_bridge: Any) -> None:
         self.vault_bridge = vault_bridge
         self.review_states = PersistentReviewStateStore()
+        self.review_automation = ReviewAutomation(self.review_states)
 
     def _controller(self) -> Any:
         if not getattr(self.vault_bridge, "available", False):
@@ -55,6 +57,8 @@ class ConflictReviewService:
         ids = tuple(dict.fromkeys(str(x) for x in memory_ids if x))
         if len(ids) < 2:
             raise ValueError("At least two memory IDs are required")
+        if conflict_case_id:
+            self.review_automation.begin_evidence(conflict_case_id, actor="system")
         principal = getattr(self.vault_bridge._backend, "principal")
         notes: list[dict[str, Any]] = []
         for note_id in ids:
@@ -88,7 +92,14 @@ class ConflictReviewService:
             results = list(pack.get("results", pack.get("items", [])))
             if results:
                 notes.append(dict(results[0]))
-        return verify_evidence_bundle(bundle, notes).as_dict()
+        verification = verify_evidence_bundle(bundle, notes).as_dict()
+        case_id = str(bundle.get("conflict_case_id") or "")
+        if case_id:
+            if verification.get("valid"):
+                self.review_automation.advance_safe(case_id, verification=verification, actor="system")
+            elif self.review_states.snapshot(case_id).get("state") == "OPEN":
+                self.review_automation.begin_evidence(case_id, actor="system")
+        return verification
 
     def issue_verdict(self, *, principal: Any, reviewer: str, verdict: str, memory_ids: Iterable[str], evidence_bundle_hash: str, evidence_valid: bool, reason: str, as_of: Any = None, known_as_of: Any = None) -> dict[str, Any]:
         """Issue an authorized review verdict without mutating memory."""
