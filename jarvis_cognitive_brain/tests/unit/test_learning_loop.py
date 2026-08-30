@@ -20,7 +20,8 @@ class FakeBackend:
 def test_learning_loop_persists_review_only():
     backend = FakeBackend()
     bridge = VaultBridge(".", backend=backend)
-    result, persisted = LearningLoop(bridge).learn(
+    loop = LearningLoop(bridge)
+    result, persisted = loop.learn(
         goal="demo",
         expected="done",
         observation={"success": True, "result": "ok"},
@@ -34,6 +35,8 @@ def test_learning_loop_persists_review_only():
     assert proposal["category"] == "learning"
     assert proposal["provenance"]["source_type"] == "ai"
     assert proposal["provenance"]["evidence_ids"] == ["obs-1"]
+    assert proposal["provenance"]["candidate_id"] == loop.last_candidate.candidate_id
+    assert proposal["provenance"]["risk"] == loop.last_candidate.risk
 
 
 def test_learning_proposal_id_is_deterministic():
@@ -49,3 +52,4 @@ def test_learning_proposal_id_is_deterministic():
     loop.learn(**kwargs)
     loop.learn(**kwargs)
     assert backend.proposals[0]["id"] == backend.proposals[1]["id"]
+    assert backend.proposals[0]["provenance"]["candidate_id"] == backend.proposals[1]["provenance"]["candidate_id"]
