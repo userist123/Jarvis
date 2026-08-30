@@ -9,6 +9,7 @@ from tkinter.scrolledtext import ScrolledText
 from jarvis.config import Settings, get_settings
 from jarvis.runtime.bootstrap import diagnose
 from jarvis.runtime.chat import ChatRuntime
+from jarvis.runtime.conflict_reviewer_ui import open_conflict_reviewer_window
 from jarvis.runtime.reviewer_ui import open_reviewer_window
 
 
@@ -23,6 +24,7 @@ class JarvisApp(tk.Tk):
         self.minsize(920, 600)
         self.configure(padx=12, pady=12)
         self._reviewer_window: tk.Toplevel | None = None
+        self._conflict_reviewer_window: tk.Toplevel | None = None
 
         self.chat = ChatRuntime(self.settings)
         self.status = tk.StringVar(value="Starting...")
@@ -92,6 +94,7 @@ class JarvisApp(tk.Tk):
 
         ttk.Separator(right).pack(fill="x", pady=12)
         ttk.Button(right, text="Open Memory Review", command=self._open_reviewer).pack(fill="x")
+        ttk.Button(right, text="Open Conflict Review", command=self._open_conflict_reviewer).pack(fill="x", pady=(6, 0))
         ttk.Button(right, text="New session", command=self._reset).pack(fill="x", pady=(6, 0))
         ttk.Button(right, text="Refresh status", command=self._refresh_status).pack(fill="x", pady=(6, 0))
 
@@ -188,6 +191,20 @@ class JarvisApp(tk.Tk):
         if self._reviewer_window is not None:
             self._reviewer_window.destroy()
         self._reviewer_window = None
+
+    def _open_conflict_reviewer(self) -> None:
+        if self._conflict_reviewer_window is not None and self._conflict_reviewer_window.winfo_exists():
+            self._conflict_reviewer_window.lift()
+            self._conflict_reviewer_window.focus_force()
+            return
+        identity = self.chat.gateway.current_reviewer_identity()
+        self._conflict_reviewer_window = open_conflict_reviewer_window(self, self.chat.gateway, identity)
+        self._conflict_reviewer_window.protocol("WM_DELETE_WINDOW", self._close_conflict_reviewer)
+
+    def _close_conflict_reviewer(self) -> None:
+        if self._conflict_reviewer_window is not None:
+            self._conflict_reviewer_window.destroy()
+        self._conflict_reviewer_window = None
 
     def _reset(self) -> None:
         self.chat.reset()
