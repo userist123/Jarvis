@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     allow_code_execution: bool = Field(default=False)
     allow_network: bool = Field(default=False)
 
+    reviewer_admin_subjects: tuple[str, ...] = Field(default=())
+
     audio_driver: Literal["auto", "sounddevice", "virtual", "mock"] = Field(default="auto")
     audio_sample_rate: int = Field(default=16000)
     tts_sample_rate: int = Field(default=24000)
