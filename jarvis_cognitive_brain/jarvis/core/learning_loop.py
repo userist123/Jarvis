@@ -7,6 +7,7 @@ from jarvis.core.reflection_engine import ReflectionEngine, ReflectionResult
 from jarvis.core.self_improvement import LearningCandidate, SelfImprovementWorkflow
 from jarvis.memory.vault_bridge import VaultBridge
 from jarvis.runtime.learning_trigger import LearningTrigger
+from jarvis.runtime.learning_confidence import assess_learning_confidence
 
 
 class LearningLoop:
@@ -19,6 +20,7 @@ class LearningLoop:
         self.learning_trigger = LearningTrigger()
         self.last_candidate: Optional[LearningCandidate] = None
         self.last_learning_case: Any = None
+        self.last_confidence: Any = None
 
     @staticmethod
     def _proposal_id(goal: str, lesson: str, evidence_ids: tuple[str, ...]) -> str:
@@ -56,9 +58,12 @@ class LearningLoop:
         )
         self.last_learning_case = learning_case
 
-        # An ineligible observation must never be persisted as a learning memory.
         if learning_case is None:
+            self.last_confidence = None
             return result, None
+
+        confidence = assess_learning_confidence(learning_case)
+        self.last_confidence = confidence
 
         proposal = {
             "id": self._proposal_id(goal, result.lesson, tuple(result.evidence_ids)),
@@ -76,6 +81,7 @@ class LearningLoop:
                 "learning_case_id": learning_case.case_id,
                 "occurrences": learning_case.occurrences,
                 "risk": learning_case.risk,
+                "confidence": confidence.as_dict(),
             },
         }
         persisted = self.vault.propose_memory(proposal)
