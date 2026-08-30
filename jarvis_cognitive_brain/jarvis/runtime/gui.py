@@ -53,25 +53,20 @@ class JarvisApp(tk.Tk):
         header.pack(fill="x", pady=(0, 10))
         ttk.Label(header, text="JARVIS", font=("Segoe UI", 20, "bold")).pack(side="left")
         ttk.Label(header, textvariable=self.status).pack(side="right")
-
         body = ttk.Panedwindow(self, orient="horizontal")
         body.pack(fill="both", expand=True)
-
         left = ttk.Frame(body, padding=8)
         right = ttk.Frame(body, padding=8)
         body.add(left, weight=4)
         body.add(right, weight=2)
-
         self.transcript = ScrolledText(left, wrap="word", state="disabled", font=("Consolas", 11))
         self.transcript.pack(fill="both", expand=True)
-
         composer = ttk.Frame(left)
         composer.pack(fill="x", pady=(10, 0))
         self.input = tk.Text(composer, height=4, wrap="word", font=("Segoe UI", 11))
         self.input.pack(side="left", fill="both", expand=True)
         self.send = ttk.Button(composer, text="Send", command=self._send)
         self.send.pack(side="right", padx=(8, 0), fill="y")
-
         ttk.Label(right, text="Cognitive Dashboard", font=("Segoe UI", 14, "bold")).pack(anchor="w", pady=(0, 10))
         self._info_row(right, "Status", self.status)
         self._info_row(right, "Mode", self.mode)
@@ -80,20 +75,17 @@ class JarvisApp(tk.Tk):
         self._info_row(right, "Executive", self.executive)
         self._info_row(right, "Agent", self.agent)
         self._info_row(right, "Agent score", self.agent_score)
-
         ttk.Separator(right).pack(fill="x", pady=10)
         ttk.Label(right, text="Grounding", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 8))
         self._info_row(right, "Evidence", self.evidence)
         self._info_row(right, "Memory count", self.memory_count)
         self._info_row(right, "Context chars", self.context_chars)
         self._info_row(right, "Memory IDs", self.memory_ids)
-
         ttk.Separator(right).pack(fill="x", pady=10)
         ttk.Label(right, text="Execution", font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 8))
         self._info_row(right, "Plan", self.plan_state)
         self._info_row(right, "Tools", self.tool_state)
         self._info_row(right, "Session", self.session)
-
         ttk.Separator(right).pack(fill="x", pady=12)
         ttk.Button(right, text="Open Governance Center", command=self._open_governance).pack(fill="x")
         ttk.Button(right, text="Open Memory Review", command=self._open_reviewer).pack(fill="x", pady=(6, 0))
@@ -140,7 +132,6 @@ class JarvisApp(tk.Tk):
             routes, council = gateway.route_agents(text)
             vault_hits = gateway.search_vault(text, limit=8)
             top = routes[0] if routes else None
-
             if gateway.executive.available:
                 result = gateway.process_intent(text)
                 answer = self._extract_answer(result)
@@ -148,16 +139,7 @@ class JarvisApp(tk.Tk):
             else:
                 answer = asyncio.run(self.chat.reply(text))
                 mode = "local-chat-fallback"
-
-            metadata = {
-                "mode": mode,
-                "agent": getattr(top, "agent_id", None) if top else None,
-                "agent_score": getattr(top, "score", None) if top else None,
-                "memory_ids": [str(item.get("id")) for item in vault_hits if item.get("id")],
-                "memory_count": len(vault_hits),
-                "context_chars": sum(len(str(item.get("content", ""))) for item in vault_hits),
-                "council": getattr(council, "mode", None),
-            }
+            metadata = {"mode": mode, "agent": getattr(top, "agent_id", None) if top else None, "agent_score": getattr(top, "score", None) if top else None, "memory_ids": [str(item.get("id")) for item in vault_hits if item.get("id")], "memory_count": len(vault_hits), "context_chars": sum(len(str(item.get("content", ""))) for item in vault_hits), "council": getattr(council, "mode", None)}
         except Exception as exc:
             answer = f"Runtime error: {exc}"
             metadata = {"mode": "error", "error": str(exc)}
@@ -183,11 +165,24 @@ class JarvisApp(tk.Tk):
 
     def _open_governance(self) -> None:
         if self._governance_window is not None and self._governance_window.winfo_exists():
-            self._governance_window.lift()
-            self._governance_window.focus_force()
-            return
-        self._governance_window = open_governance_center(self, self.chat.gateway)
+            self._governance_window.lift(); self._governance_window.focus_force(); return
+        self._governance_window = open_governance_center(
+            self,
+            self.chat.gateway,
+            open_learning=self._open_reviewer_for_case,
+            open_conflict=self._open_conflict_for_case,
+        )
         self._governance_window.protocol("WM_DELETE_WINDOW", self._close_governance)
+
+    def _open_reviewer_for_case(self, case_id: str) -> None:
+        self._open_reviewer()
+        if self._reviewer_window is not None:
+            self._reviewer_window.select_case(case_id)
+
+    def _open_conflict_for_case(self, case_id: str) -> None:
+        self._open_conflict_reviewer()
+        if self._conflict_reviewer_window is not None:
+            self._conflict_reviewer_window.load_case(case_id)
 
     def _close_governance(self) -> None:
         if self._governance_window is not None:
@@ -196,69 +191,46 @@ class JarvisApp(tk.Tk):
 
     def _open_reviewer(self) -> None:
         if self._reviewer_window is not None and self._reviewer_window.winfo_exists():
-            self._reviewer_window.lift()
-            self._reviewer_window.focus_force()
-            return
+            self._reviewer_window.lift(); self._reviewer_window.focus_force(); return
         identity = self.chat.gateway.current_reviewer_identity()
         self._reviewer_window = open_reviewer_window(self, self.chat.gateway, identity=identity)
         self._reviewer_window.protocol("WM_DELETE_WINDOW", self._close_reviewer)
 
     def _close_reviewer(self) -> None:
-        if self._reviewer_window is not None:
-            self._reviewer_window.destroy()
+        if self._reviewer_window is not None: self._reviewer_window.destroy()
         self._reviewer_window = None
 
     def _open_conflict_reviewer(self) -> None:
         if self._conflict_reviewer_window is not None and self._conflict_reviewer_window.winfo_exists():
-            self._conflict_reviewer_window.lift()
-            self._conflict_reviewer_window.focus_force()
-            return
+            self._conflict_reviewer_window.lift(); self._conflict_reviewer_window.focus_force(); return
         identity = self.chat.gateway.current_reviewer_identity()
         self._conflict_reviewer_window = open_conflict_reviewer_window(self, self.chat.gateway, identity)
         self._conflict_reviewer_window.protocol("WM_DELETE_WINDOW", self._close_conflict_reviewer)
 
     def _close_conflict_reviewer(self) -> None:
-        if self._conflict_reviewer_window is not None:
-            self._conflict_reviewer_window.destroy()
+        if self._conflict_reviewer_window is not None: self._conflict_reviewer_window.destroy()
         self._conflict_reviewer_window = None
 
     def _reset(self) -> None:
-        self.chat.reset()
-        self.session.set(self.chat.session_id)
-        self.transcript.configure(state="normal")
-        self.transcript.delete("1.0", "end")
-        self.transcript.configure(state="disabled")
-        self.mode.set("ready")
-        self.evidence.set("n/a")
-        self.agent.set("not routed")
-        self.agent_score.set("-")
-        self.memory_count.set("0")
-        self.memory_ids.set("-")
-        self.context_chars.set("0")
-        self.plan_state.set("idle")
+        self.chat.reset(); self.session.set(self.chat.session_id)
+        self.transcript.configure(state="normal"); self.transcript.delete("1.0", "end"); self.transcript.configure(state="disabled")
+        self.mode.set("ready"); self.evidence.set("n/a"); self.agent.set("not routed"); self.agent_score.set("-"); self.memory_count.set("0"); self.memory_ids.set("-"); self.context_chars.set("0"); self.plan_state.set("idle")
 
     def _refresh_status(self) -> None:
         def worker() -> None:
             try:
-                status = asyncio.run(diagnose(self.settings))
-                runtime_text = "Ready" if status.ollama_healthy else "Ollama unavailable"
-                exec_text = "available" if status.executive_available else status.executive_reason
+                status = asyncio.run(diagnose(self.settings)); runtime_text = "Ready" if status.ollama_healthy else "Ollama unavailable"; exec_text = "available" if status.executive_available else status.executive_reason
             except Exception as exc:
-                runtime_text = f"Diagnostics error: {exc}"
-                exec_text = "unknown"
+                runtime_text = f"Diagnostics error: {exc}"; exec_text = "unknown"
             self.after(0, self._apply_status, runtime_text, exec_text)
-
         threading.Thread(target=worker, daemon=True).start()
 
     def _apply_status(self, runtime_text: str, executive_text: str) -> None:
-        self.status.set(runtime_text)
-        self.executive.set(executive_text)
+        self.status.set(runtime_text); self.executive.set(executive_text)
 
 
 def main() -> int:
-    app = JarvisApp()
-    app.mainloop()
-    return 0
+    app = JarvisApp(); app.mainloop(); return 0
 
 
 if __name__ == "__main__":
