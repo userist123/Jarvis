@@ -25,11 +25,12 @@ class LearningLoop:
         self.vault = vault_bridge
         self.reflection = reflection or ReflectionEngine()
         self.self_improvement = SelfImprovementWorkflow()
+        self.store = store or PersistentLearningStore(store_path or ".jarvis/learning_cases.json")
         self.learning_trigger = LearningTrigger()
+        self.learning_trigger.deduplicator.restore(self.store.records())
         self.last_candidate: Optional[LearningCandidate] = None
         self.last_learning_case: Any = None
         self.last_confidence: Any = None
-        self.store = store or PersistentLearningStore(store_path or ".jarvis/learning_cases.json")
 
     @staticmethod
     def _proposal_id(goal: str, lesson: str, evidence_ids: tuple[str, ...]) -> str:
